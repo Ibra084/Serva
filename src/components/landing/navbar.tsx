@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Menu, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Container } from "@/components/shared/container";
 
 const links = [
@@ -77,11 +78,23 @@ export function Navbar() {
           ))}
         </nav>
 
-        <div className="hidden lg:block">
-          <Button className="group h-9 rounded-lg px-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-8px_rgba(31,107,66,0.55)]">
+        <div className="hidden items-center gap-5 lg:flex">
+          <Link
+            href="/login"
+            className="font-heading text-[0.925rem] font-medium text-muted-foreground transition-colors duration-300 hover:text-foreground"
+          >
+            Login
+          </Link>
+          <Link
+            href="/demo"
+            className={buttonVariants({
+              className:
+                "group h-9 rounded-lg px-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-8px_rgba(31,107,66,0.55)]",
+            })}
+          >
             Request a demo
             <ArrowRight className="size-4 transition-transform duration-300 group-hover:translate-x-1" />
-          </Button>
+          </Link>
         </div>
 
         <button
@@ -111,7 +124,20 @@ export function Navbar() {
                 {link.label}
               </a>
             ))}
-            <Button className="mt-2 w-full rounded-lg">Request a demo</Button>
+            <Link
+              href="/login"
+              onClick={() => setOpen(false)}
+              className="rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              Login
+            </Link>
+            <Link
+              href="/demo"
+              onClick={() => setOpen(false)}
+              className={buttonVariants({ className: "mt-2 w-full rounded-lg" })}
+            >
+              Request a demo
+            </Link>
           </Container>
         </motion.div>
       )}
