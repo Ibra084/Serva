@@ -104,7 +104,10 @@ create policy "members can view their memberships"
   on public.memberships for select
   using (
     user_id = auth.uid()
-    or restaurant_id in (select restaurant_id from public.memberships where user_id = auth.uid())
+    or exists (
+      select 1 from public.restaurants r
+      where r.id = memberships.restaurant_id and r.owner_user_id = auth.uid()
+    )
   );
 
 create policy "owners can add memberships to their restaurant"
