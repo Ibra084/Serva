@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, AI_MODEL } from "@/lib/openai";
+import { getOpenAI, AI_MODEL } from "@/lib/openai";
 import {
   answerBusinessQuestion,
   calculateDashboardMetrics,
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: AI_MODEL,
       messages: [
         {
