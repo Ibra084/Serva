@@ -1,38 +1,27 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import { Sparkles, X, IceCream2, TrendingUp, Clock } from "lucide-react";
+import { Sparkles, X, IceCream2, TrendingUp, Clock, Info } from "lucide-react";
+import { useRestaurantData } from "@/lib/use-restaurant-data";
+import { generateOpportunities } from "@/lib/insights";
 
-const recommendations = [
-  {
-    title: "Offer dessert within 3 minutes of clearing mains",
-    detail: "37 guests skipped dessert last night after their main course.",
-    metric: "+AED 3,800 / mo",
-    icon: IceCream2,
-  },
-  {
-    title: "Raise Truffle Pasta by AED 2",
-    detail: "Current margin comfortably supports the increase.",
-    metric: "92% confidence",
-    icon: TrendingUp,
-  },
-  {
-    title: "Add a server to the Friday dinner rush",
-    detail: "Dinner traffic is starting 18 minutes earlier on Fridays.",
-    metric: "+1 server, 6–9pm",
-    icon: Clock,
-  },
-];
+const iconForIndex = [IceCream2, TrendingUp, Clock];
 
 export function AIBriefTrigger({
   className,
   children,
   restaurantName,
+  restaurantSlug,
 }: {
   className?: string;
   children: React.ReactNode;
   restaurantName: string;
+  restaurantSlug: string;
 }) {
+  const { data, hasData } = useRestaurantData(restaurantSlug);
+  const opportunities = data ? generateOpportunities(data) : [];
+  const totalGain = opportunities.reduce((sum, item) => sum + item.estimatedMonthlyGain, 0);
+
   return (
     <Dialog.Root>
       <Dialog.Trigger className={className}>{children}</Dialog.Trigger>
@@ -49,7 +38,7 @@ export function AIBriefTrigger({
                   Today&rsquo;s AI Brief
                 </Dialog.Title>
                 <Dialog.Description className="text-xs text-muted-foreground">
-                  {restaurantName} · Tuesday, 7:02 AM
+                  {restaurantName}
                 </Dialog.Description>
               </div>
             </div>
@@ -61,27 +50,45 @@ export function AIBriefTrigger({
             </Dialog.Close>
           </div>
 
-          <div className="flex flex-col divide-y divide-border overflow-y-auto">
-            {recommendations.map((item) => (
-              <div key={item.title} className="flex gap-3 px-6 py-4">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                  <item.icon className="size-4" />
-                </span>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-foreground">{item.title}</p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">{item.detail}</p>
-                  <span className="mt-2 inline-block rounded-md bg-accent px-2 py-1 text-xs font-medium text-accent-foreground">
-                    {item.metric}
-                  </span>
-                </div>
+          {hasData && opportunities.length > 0 ? (
+            <>
+              <div className="flex flex-col divide-y divide-border overflow-y-auto">
+                {opportunities.slice(0, 3).map((item, index) => {
+                  const Icon = iconForIndex[index] ?? Sparkles;
+                  return (
+                    <div key={item.title} className="flex gap-3 px-6 py-4">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                        <Icon className="size-4" />
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-foreground">{item.title}</p>
+                        <p className="mt-0.5 text-sm text-muted-foreground">{item.explanation}</p>
+                        <span className="mt-2 inline-block rounded-md bg-accent px-2 py-1 text-xs font-medium text-accent-foreground">
+                          {item.estimatedMonthlyGain > 0
+                            ? `+AED ${item.estimatedMonthlyGain.toLocaleString()} / mo`
+                            : `${item.confidence}% confidence`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
 
-          <div className="flex items-center justify-between border-t border-border bg-secondary/50 px-6 py-4">
-            <p className="text-xs text-muted-foreground">Predicted monthly gain</p>
-            <p className="font-serif text-lg font-medium text-primary">+AED 3,800</p>
-          </div>
+              <div className="flex items-center justify-between border-t border-border bg-secondary/50 px-6 py-4">
+                <p className="text-xs text-muted-foreground">Predicted monthly gain</p>
+                <p className="font-serif text-lg font-medium text-primary">
+                  +AED {totalGain.toLocaleString()}
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+              <Info className="size-5 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Upload order, menu, and review data to generate your AI brief.
+              </p>
+            </div>
+          )}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>

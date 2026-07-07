@@ -1,0 +1,154 @@
+order_id,date,time,customer_id,table_id,dish,category,quantity,price
+ORD-0001,2026-07-05,21:00,C131,T11,Burrata Caprese,Starters,1,48
+ORD-0001,2026-07-05,21:00,C131,T11,Calamari Fritti,Starters,1,45
+ORD-0002,2026-07-05,21:30,C107,T3,Espresso Martini,Beverages,1,55
+ORD-0002,2026-07-05,21:30,C107,T3,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0002,2026-07-05,21:30,C107,T3,Truffle Arancini,Starters,1,42
+ORD-0003,2026-07-05,19:40,C104,T17,Truffle Pasta,Mains,2,98
+ORD-0004,2026-07-05,12:15,C107,T12,Grilled Salmon,Mains,1,120
+ORD-0004,2026-07-05,12:15,C107,T12,Steak Frites,Mains,1,145
+ORD-0004,2026-07-05,12:15,C107,T12,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0004,2026-07-05,12:15,C107,T12,Espresso Martini,Beverages,1,55
+ORD-0005,2026-07-05,20:05,C232,T11,Truffle Arancini,Starters,1,42
+ORD-0005,2026-07-05,20:05,C232,T11,House Red Wine,Beverages,1,62
+ORD-0005,2026-07-05,20:05,C232,T11,Burrata Caprese,Starters,1,48
+ORD-0006,2026-07-05,18:10,C228,T7,House Red Wine,Beverages,1,62
+ORD-0006,2026-07-05,18:10,C228,T7,Grilled Salmon,Mains,1,120
+ORD-0007,2026-07-05,12:15,C131,T6,Truffle Arancini,Starters,1,42
+ORD-0007,2026-07-05,12:15,C131,T6,Espresso Martini,Beverages,2,55
+ORD-0008,2026-07-05,13:05,C105,T3,Espresso Martini,Beverages,1,55
+ORD-0009,2026-07-05,20:05,C133,T11,Burrata Caprese,Starters,2,48
+ORD-0009,2026-07-05,20:05,C133,T11,Truffle Arancini,Starters,1,42
+ORD-0010,2026-07-05,20:05,C248,T10,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0010,2026-07-05,20:05,C248,T10,Margherita Pizza,Mains,1,68
+ORD-0010,2026-07-05,20:05,C248,T10,Truffle Pasta,Mains,1,98
+ORD-0011,2026-07-05,13:05,C212,T16,Steak Frites,Mains,1,145
+ORD-0011,2026-07-05,13:05,C212,T16,Burrata Caprese,Starters,2,48
+ORD-0012,2026-07-05,20:05,C249,T5,Espresso Martini,Beverages,1,55
+ORD-0012,2026-07-05,20:05,C249,T5,Steak Frites,Mains,1,145
+ORD-0012,2026-07-05,20:05,C249,T5,Truffle Pasta,Mains,1,98
+ORD-0013,2026-07-05,21:00,C108,T15,Chocolate Fondant,Desserts,1,42
+ORD-0013,2026-07-05,21:00,C108,T15,Grilled Salmon,Mains,1,120
+ORD-0013,2026-07-05,21:00,C108,T15,Sparkling Water,Beverages,1,18
+ORD-0014,2026-07-05,12:15,C113,T8,Burrata Caprese,Starters,1,48
+ORD-0014,2026-07-05,12:15,C113,T8,Truffle Pasta,Mains,1,98
+ORD-0015,2026-07-05,20:05,C223,T15,Calamari Fritti,Starters,1,45
+ORD-0016,2026-07-05,19:40,C131,T8,Truffle Arancini,Starters,1,42
+ORD-0016,2026-07-05,19:40,C131,T8,Burrata Caprese,Starters,1,48
+ORD-0016,2026-07-05,19:40,C131,T8,Grilled Salmon,Mains,1,120
+ORD-0017,2026-07-05,13:05,C129,T8,Steak Frites,Mains,1,145
+ORD-0018,2026-07-05,12:15,C140,T8,Steak Frites,Mains,2,145
+ORD-0018,2026-07-05,12:15,C140,T8,Caesar Salad,Salads,1,52
+ORD-0019,2026-07-05,18:10,C223,T10,Steak Frites,Mains,1,145
+ORD-0020,2026-07-05,18:45,C124,T4,Sparkling Water,Beverages,1,18
+ORD-0021,2026-07-05,12:15,C109,T11,House Red Wine,Beverages,1,62
+ORD-0021,2026-07-05,12:15,C109,T11,Grilled Salmon,Mains,2,120
+ORD-0022,2026-07-05,19:40,C106,T5,Grilled Salmon,Mains,1,120
+ORD-0023,2026-07-05,13:30,C104,T11,Chocolate Fondant,Desserts,1,42
+ORD-0023,2026-07-05,13:30,C104,T11,Calamari Fritti,Starters,1,45
+ORD-0023,2026-07-05,13:30,C104,T11,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0024,2026-07-05,12:15,C231,T11,Caesar Salad,Salads,1,52
+ORD-0025,2026-07-05,14:20,C111,T13,Grilled Salmon,Mains,2,120
+ORD-0025,2026-07-05,14:20,C111,T13,Burrata Caprese,Starters,1,48
+ORD-0026,2026-07-05,20:05,C120,T13,Calamari Fritti,Starters,1,45
+ORD-0027,2026-07-05,19:15,C127,T18,Espresso Martini,Beverages,1,55
+ORD-0027,2026-07-05,19:15,C127,T18,Grilled Salmon,Mains,2,120
+ORD-0028,2026-07-05,13:30,C140,T16,Sparkling Water,Beverages,1,18
+ORD-0029,2026-07-05,20:05,C234,T4,Truffle Arancini,Starters,1,42
+ORD-0029,2026-07-05,20:05,C234,T4,Steak Frites,Mains,1,145
+ORD-0029,2026-07-05,20:05,C234,T4,Sparkling Water,Beverages,1,18
+ORD-0030,2026-07-05,14:20,C111,T4,Caesar Salad,Salads,1,52
+ORD-0030,2026-07-05,14:20,C111,T4,Grilled Salmon,Mains,2,120
+ORD-0031,2026-07-05,13:55,C111,T15,Grilled Salmon,Mains,1,120
+ORD-0031,2026-07-05,13:55,C111,T15,Truffle Arancini,Starters,1,42
+ORD-0031,2026-07-05,13:55,C111,T15,Caesar Salad,Salads,1,52
+ORD-0032,2026-07-05,19:15,C133,T7,Truffle Pasta,Mains,1,98
+ORD-0032,2026-07-05,19:15,C133,T7,Burrata Caprese,Starters,1,48
+ORD-0033,2026-07-05,21:30,C218,T15,House Red Wine,Beverages,1,62
+ORD-0033,2026-07-05,21:30,C218,T15,Steak Frites,Mains,1,145
+ORD-0034,2026-07-05,21:00,C252,T5,Truffle Arancini,Starters,1,42
+ORD-0035,2026-07-06,19:40,C240,T1,Grilled Salmon,Mains,1,120
+ORD-0036,2026-07-06,19:15,C214,T7,Espresso Martini,Beverages,2,55
+ORD-0037,2026-07-06,20:35,C109,T2,Espresso Martini,Beverages,2,55
+ORD-0038,2026-07-06,19:15,C210,T2,Margherita Pizza,Mains,1,68
+ORD-0038,2026-07-06,19:15,C210,T2,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0038,2026-07-06,19:15,C210,T2,Caesar Salad,Salads,1,52
+ORD-0039,2026-07-06,14:20,C259,T11,Chocolate Fondant,Desserts,1,42
+ORD-0039,2026-07-06,14:20,C259,T11,Truffle Pasta,Mains,1,98
+ORD-0040,2026-07-06,20:05,C104,T8,Truffle Arancini,Starters,1,42
+ORD-0040,2026-07-06,20:05,C104,T8,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0040,2026-07-06,20:05,C104,T8,Truffle Pasta,Mains,1,98
+ORD-0040,2026-07-06,20:05,C104,T8,Margherita Pizza,Mains,2,68
+ORD-0041,2026-07-06,19:15,C227,T4,House Red Wine,Beverages,1,62
+ORD-0041,2026-07-06,19:15,C227,T4,Caesar Salad,Salads,1,52
+ORD-0041,2026-07-06,19:15,C227,T4,Grilled Salmon,Mains,1,120
+ORD-0042,2026-07-06,18:45,C204,T16,Truffle Pasta,Mains,1,98
+ORD-0043,2026-07-06,21:30,C260,T6,Steak Frites,Mains,1,145
+ORD-0044,2026-07-06,19:40,C256,T16,Grilled Salmon,Mains,1,120
+ORD-0044,2026-07-06,19:40,C256,T16,Lamb Ragu Pappardelle,Mains,2,105
+ORD-0045,2026-07-06,13:30,C129,T1,Calamari Fritti,Starters,1,45
+ORD-0045,2026-07-06,13:30,C129,T1,Truffle Arancini,Starters,1,42
+ORD-0045,2026-07-06,13:30,C129,T1,Caesar Salad,Salads,2,52
+ORD-0046,2026-07-06,19:40,C208,T15,House Red Wine,Beverages,1,62
+ORD-0046,2026-07-06,19:40,C208,T15,Truffle Arancini,Starters,1,42
+ORD-0047,2026-07-06,14:20,C220,T7,Caesar Salad,Salads,2,52
+ORD-0047,2026-07-06,14:20,C220,T7,Truffle Pasta,Mains,2,98
+ORD-0048,2026-07-06,14:20,C257,T5,Burrata Caprese,Starters,1,48
+ORD-0049,2026-07-06,18:45,C112,T2,Steak Frites,Mains,1,145
+ORD-0049,2026-07-06,18:45,C112,T2,Grilled Salmon,Mains,1,120
+ORD-0049,2026-07-06,18:45,C112,T2,Calamari Fritti,Starters,2,45
+ORD-0050,2026-07-06,13:30,C101,T11,Grilled Salmon,Mains,1,120
+ORD-0050,2026-07-06,13:30,C101,T11,Sparkling Water,Beverages,1,18
+ORD-0050,2026-07-06,13:30,C101,T11,Steak Frites,Mains,1,145
+ORD-0051,2026-07-06,19:15,C223,T16,Grilled Salmon,Mains,1,120
+ORD-0051,2026-07-06,19:15,C223,T16,Burrata Caprese,Starters,2,48
+ORD-0051,2026-07-06,19:15,C223,T16,Chocolate Fondant,Desserts,1,42
+ORD-0052,2026-07-06,12:40,C121,T13,Truffle Pasta,Mains,1,98
+ORD-0053,2026-07-06,19:40,C228,T17,Truffle Pasta,Mains,2,98
+ORD-0053,2026-07-06,19:40,C228,T17,Margherita Pizza,Mains,1,68
+ORD-0054,2026-07-06,18:10,C247,T2,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0054,2026-07-06,18:10,C247,T2,Calamari Fritti,Starters,2,45
+ORD-0054,2026-07-06,18:10,C247,T2,House Red Wine,Beverages,1,62
+ORD-0055,2026-07-06,21:00,C100,T3,Espresso Martini,Beverages,2,55
+ORD-0055,2026-07-06,21:00,C100,T3,Steak Frites,Mains,1,145
+ORD-0055,2026-07-06,21:00,C100,T3,Lamb Ragu Pappardelle,Mains,2,105
+ORD-0056,2026-07-06,14:20,C232,T10,Truffle Pasta,Mains,1,98
+ORD-0056,2026-07-06,14:20,C232,T10,Truffle Arancini,Starters,1,42
+ORD-0056,2026-07-06,14:20,C232,T10,Espresso Martini,Beverages,2,55
+ORD-0057,2026-07-06,20:05,C129,T2,Truffle Arancini,Starters,1,42
+ORD-0058,2026-07-06,12:15,C246,T15,Truffle Pasta,Mains,1,98
+ORD-0058,2026-07-06,12:15,C246,T15,Burrata Caprese,Starters,1,48
+ORD-0058,2026-07-06,12:15,C246,T15,Steak Frites,Mains,1,145
+ORD-0059,2026-07-06,19:40,C239,T11,Truffle Arancini,Starters,1,42
+ORD-0059,2026-07-06,19:40,C239,T11,Lamb Ragu Pappardelle,Mains,2,105
+ORD-0059,2026-07-06,19:40,C239,T11,Burrata Caprese,Starters,1,48
+ORD-0060,2026-07-06,12:40,C107,T2,House Red Wine,Beverages,2,62
+ORD-0061,2026-07-06,12:40,C121,T1,House Red Wine,Beverages,2,62
+ORD-0061,2026-07-06,12:40,C121,T1,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0061,2026-07-06,12:40,C121,T1,Margherita Pizza,Mains,2,68
+ORD-0062,2026-07-06,13:05,C140,T14,Steak Frites,Mains,1,145
+ORD-0062,2026-07-06,13:05,C140,T14,Sparkling Water,Beverages,2,18
+ORD-0063,2026-07-06,13:30,C128,T4,Margherita Pizza,Mains,1,68
+ORD-0063,2026-07-06,13:30,C128,T4,Caesar Salad,Salads,1,52
+ORD-0064,2026-07-06,20:05,C134,T17,Chocolate Fondant,Desserts,1,42
+ORD-0064,2026-07-06,20:05,C134,T17,Steak Frites,Mains,2,145
+ORD-0065,2026-07-06,21:00,C101,T12,House Red Wine,Beverages,1,62
+ORD-0065,2026-07-06,21:00,C101,T12,Burrata Caprese,Starters,1,48
+ORD-0065,2026-07-06,21:00,C101,T12,Grilled Salmon,Mains,1,120
+ORD-0065,2026-07-06,21:00,C101,T12,Truffle Arancini,Starters,2,42
+ORD-0066,2026-07-06,20:35,C134,T1,House Red Wine,Beverages,1,62
+ORD-0066,2026-07-06,20:35,C134,T1,Grilled Salmon,Mains,1,120
+ORD-0067,2026-07-06,18:45,C258,T18,Truffle Pasta,Mains,1,98
+ORD-0068,2026-07-06,13:55,C214,T9,Steak Frites,Mains,2,145
+ORD-0068,2026-07-06,13:55,C214,T9,Chocolate Fondant,Desserts,2,42
+ORD-0068,2026-07-06,13:55,C214,T9,Burrata Caprese,Starters,2,48
+ORD-0069,2026-07-06,19:40,C245,T1,Margherita Pizza,Mains,1,68
+ORD-0070,2026-07-06,20:05,C123,T2,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0070,2026-07-06,20:05,C123,T2,Truffle Arancini,Starters,1,42
+ORD-0070,2026-07-06,20:05,C123,T2,Steak Frites,Mains,1,145
+ORD-0070,2026-07-06,20:05,C123,T2,Espresso Martini,Beverages,1,55
+ORD-0071,2026-07-06,19:40,C260,T18,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0072,2026-07-06,21:30,C113,T12,Margherita Pizza,Mains,1,68
+ORD-0072,2026-07-06,21:30,C113,T12,Calamari Fritti,Starters,1,45
+ORD-0073,2026-07-06,20:05,C109,T12,Lamb Ragu Pappardelle,Mains,1,105
+ORD-0073,2026-07-06,20:05,C109,T12,Grilled Salmon,Mains,1,120

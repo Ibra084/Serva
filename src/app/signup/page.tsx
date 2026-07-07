@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { AuthShell, AuthDivider } from "@/components/auth/auth-shell";
 import { createClient } from "@/lib/supabase/client";
 import { enableDemoSession } from "@/lib/demo-session";
+import { createDemoWorkspace, loginAsDemoUser, setCurrentUser } from "@/lib/workspace-store";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -38,13 +39,19 @@ export default function SignupPage() {
       return;
     }
 
-    if (!data.session) {
+    if (!data.session || !data.user) {
       setCheckEmail(true);
       setSubmitting(false);
       return;
     }
 
-    router.push("/portal");
+    setCurrentUser({
+      id: data.user.id,
+      name: (data.user.user_metadata?.full_name as string) || data.user.email || "User",
+      email: data.user.email ?? "",
+    });
+
+    router.push("/onboarding/create-restaurant");
     router.refresh();
   }
 
@@ -88,7 +95,9 @@ export default function SignupPage() {
         className="h-10 w-full rounded-full text-sm"
         onClick={() => {
           enableDemoSession();
-          router.push("/portal");
+          loginAsDemoUser();
+          const workspace = createDemoWorkspace();
+          router.push(`/portal/${workspace.slug}/dashboard`);
         }}
       >
         Continue with demo account

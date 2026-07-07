@@ -9,6 +9,18 @@ import { Input } from "@/components/ui/input";
 import { AuthShell, AuthDivider } from "@/components/auth/auth-shell";
 import { createClient } from "@/lib/supabase/client";
 import { enableDemoSession } from "@/lib/demo-session";
+import { createDemoWorkspace, getUserWorkspaces, loginAsDemoUser, setCurrentUser } from "@/lib/workspace-store";
+
+function redirectAfterAuth(router: ReturnType<typeof useRouter>) {
+  const workspaces = getUserWorkspaces();
+  if (workspaces.length === 1) {
+    router.push(`/portal/${workspaces[0].workspace.slug}/dashboard`);
+  } else if (workspaces.length > 1) {
+    router.push("/workspace-select");
+  } else {
+    router.push("/onboarding/create-restaurant");
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +35,7 @@ export default function LoginPage() {
     const formData = new FormData(event.currentTarget);
     const supabase = createClient();
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: String(formData.get("email")),
       password: String(formData.get("password")),
     });
@@ -34,7 +46,15 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/portal");
+    if (data.user) {
+      setCurrentUser({
+        id: data.user.id,
+        name: (data.user.user_metadata?.full_name as string) || data.user.email || "User",
+        email: data.user.email ?? "",
+      });
+    }
+
+    redirectAfterAuth(router);
     router.refresh();
   }
 
@@ -57,7 +77,9 @@ export default function LoginPage() {
         className="h-10 w-full rounded-full text-sm"
         onClick={() => {
           enableDemoSession();
-          router.push("/portal");
+          loginAsDemoUser();
+          const workspace = createDemoWorkspace();
+          router.push(`/portal/${workspace.slug}/dashboard`);
         }}
       >
         Continue with demo account

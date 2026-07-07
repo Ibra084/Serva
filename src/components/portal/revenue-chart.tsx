@@ -1,18 +1,20 @@
 "use client";
 
-const chartValues = [58, 54, 50, 47, 49, 46, 52, 60, 63, 61, 68, 74];
+const defaultChartValues = [58, 54, 50, 47, 49, 46, 52, 60, 63, 61, 68, 74];
 const axisLabels = ["6am", "10am", "2pm", "6pm", "10pm"];
 
-export function PortalRevenueChart() {
+export function PortalRevenueChart({ values }: { values?: number[] }) {
+  const chartValues = values && values.length > 1 ? values : defaultChartValues;
   const width = 100;
   const height = 100;
   const max = Math.max(...chartValues);
   const min = Math.min(...chartValues);
   const step = width / (chartValues.length - 1);
 
+  const range = max - min || 1;
   const coords = chartValues.map((value, index) => {
     const x = index * step;
-    const y = height - ((value - min) / (max - min)) * height;
+    const y = height - ((value - min) / range) * height;
     return [x, y] as const;
   });
 
