@@ -28,8 +28,8 @@ export default function WorkspaceSelectPage() {
     router.push(`/portal/${slug}/dashboard`);
   }
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 

@@ -8,11 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthShell, AuthDivider } from "@/components/auth/auth-shell";
 import { createClient } from "@/lib/supabase/client";
-import { enableDemoSession } from "@/lib/demo-session";
-import { createDemoWorkspace, getUserWorkspaces, loginAsDemoUser, setCurrentUser } from "@/lib/workspace-store";
+import { createDemoWorkspace, getUserWorkspaces, loginAsDemoUser } from "@/lib/workspace-store";
 
-function redirectAfterAuth(router: ReturnType<typeof useRouter>) {
-  const workspaces = getUserWorkspaces();
+async function redirectAfterAuth(router: ReturnType<typeof useRouter>) {
+  const workspaces = await getUserWorkspaces();
   if (workspaces.length === 1) {
     router.push(`/portal/${workspaces[0].workspace.slug}/dashboard`);
   } else if (workspaces.length > 1) {
@@ -25,6 +24,7 @@ function redirectAfterAuth(router: ReturnType<typeof useRouter>) {
 export default function LoginPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -46,16 +46,20 @@ export default function LoginPage() {
       return;
     }
 
-    if (data.user) {
-      setCurrentUser({
-        id: data.user.id,
-        name: (data.user.user_metadata?.full_name as string) || data.user.email || "User",
-        email: data.user.email ?? "",
-      });
-    }
-
-    redirectAfterAuth(router);
+    await redirectAfterAuth(router);
     router.refresh();
+  }
+
+  async function handleDemo() {
+    setDemoLoading(true);
+    try {
+      await loginAsDemoUser();
+      const workspace = await createDemoWorkspace();
+      router.push(`/portal/${workspace.slug}/dashboard`);
+      router.refresh();
+    } finally {
+      setDemoLoading(false);
+    }
   }
 
   return (
@@ -74,15 +78,18 @@ export default function LoginPage() {
       <Button
         type="button"
         size="lg"
+        disabled={demoLoading}
         className="h-10 w-full rounded-full text-sm"
-        onClick={() => {
-          enableDemoSession();
-          loginAsDemoUser();
-          const workspace = createDemoWorkspace();
-          router.push(`/portal/${workspace.slug}/dashboard`);
-        }}
+        onClick={handleDemo}
       >
-        Continue with demo account
+        {demoLoading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Starting demo...
+          </>
+        ) : (
+          "Continue with demo account"
+        )}
       </Button>
 
       <AuthDivider />

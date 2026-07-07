@@ -7,9 +7,9 @@ import { AiAssistantPanel, type ChatMessage } from "@/components/qr/ai-assistant
 import { MenuBrowser } from "@/components/qr/menu-browser";
 import { BasketBar, BasketSheet } from "@/components/qr/basket-sheet";
 import { ReviewFlow, type ReviewInput } from "@/components/qr/review-flow";
-import { useRestaurantData } from "@/lib/use-restaurant-data";
+import { useQRMenu } from "@/lib/use-restaurant-data";
 import { detectCustomerIntent, recommendMenuItems } from "@/lib/qr-insights";
-import { loadQRInteractions, saveQRInteraction, saveQROrder, saveQRReview } from "@/lib/qr-store";
+import { markQRInteractionAccepted, saveQRInteraction, saveQROrder, saveQRReview } from "@/lib/qr-store";
 import { unslugify } from "@/lib/utils";
 import type { MenuItem, QRBasketItem, QROrder } from "@/lib/types";
 
@@ -33,7 +33,7 @@ export function QRCustomerClient({
   restaurantId: string;
   tableId: string | null;
 }) {
-  const { data, loading, hasData } = useRestaurantData(restaurantId);
+  const { menu, orders, loading, hasData } = useQRMenu(restaurantId);
   const restaurantName = unslugify(restaurantId) || "Serva Restaurant";
 
   const [view, setView] = useState<View>("welcome");
@@ -45,6 +45,7 @@ export function QRCustomerClient({
     },
   ]);
   const [chatInput, setChatInput] = useState("");
+  const [asking, setAsking] = useState(false);
   const [basket, setBasket] = useState<QRBasketItem[]>([]);
   const [basketOpen, setBasketOpen] = useState(false);
   const [specialRequests, setSpecialRequests] = useState("");
@@ -69,11 +70,11 @@ export function QRCustomerClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function ask(question: string) {
+  async function ask(question: string) {
     const trimmed = question.trim();
-    if (!trimmed || !data) return;
+    if (!trimmed || asking) return;
     const intent = detectCustomerIntent(trimmed);
-    const recommended = recommendMenuItems(data.menu, intent, trimmed, data.orders);
+    const recommended = recommendMenuItems(menu, intent, trimmed, orders);
     const interactionId = newId();
 
     saveQRInteraction(restaurantId, {
@@ -87,19 +88,35 @@ export function QRCustomerClient({
       acceptedRecommendation: false,
     });
 
-    setMessages((prev) => [
-      ...prev,
-      { id: newId(), role: "user", text: trimmed },
-      {
-        id: newId(),
-        role: "assistant",
-        text: buildReplyText(intent, recommended),
-        recommendedItems: recommended,
-        interactionId,
-      },
-    ]);
+    setMessages((prev) => [...prev, { id: newId(), role: "user", text: trimmed }]);
     setChatInput("");
     setView("assistant");
+    setAsking(true);
+
+    let text = buildReplyText(intent, recommended);
+    try {
+      const response = await fetch("/api/ai/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: trimmed,
+          data: { menu, orders, reviews: [], tables: [], importedAt: new Date().toISOString() },
+        }),
+      });
+      if (response.ok) {
+        const result = (await response.json()) as { answer?: string };
+        if (result.answer) text = result.answer;
+      }
+    } catch {
+      // fall back to the locally generated reply below
+    } finally {
+      setAsking(false);
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      { id: newId(), role: "assistant", text, recommendedItems: recommended, interactionId },
+    ]);
   }
 
   function addToBasket(item: MenuItem, quantity = 1) {
@@ -117,10 +134,7 @@ export function QRCustomerClient({
   function addRecommendedToBasket(item: MenuItem, interactionId?: string) {
     addToBasket(item);
     if (!interactionId) return;
-    const match = loadQRInteractions(restaurantId).find((entry) => entry.id === interactionId);
-    if (match && !match.acceptedRecommendation) {
-      saveQRInteraction(restaurantId, { ...match, acceptedRecommendation: true });
-    }
+    markQRInteractionAccepted(restaurantId, interactionId);
   }
 
   function changeQuantity(dish: string, quantity: number) {
@@ -130,7 +144,7 @@ export function QRCustomerClient({
     });
   }
 
-  function submitOrder() {
+  async function submitOrder() {
     if (basket.length === 0) return;
     const recommendedDishSet = new Set(
       messages.flatMap((message) => message.recommendedItems?.map((item) => item.dish) ?? [])
@@ -152,7 +166,7 @@ export function QRCustomerClient({
       status: "new",
     };
 
-    saveQROrder(restaurantId, order);
+    await saveQROrder(restaurantId, order);
     setLastOrder(order);
     setBasket([]);
     setSpecialRequests("");
@@ -160,8 +174,8 @@ export function QRCustomerClient({
     setView("confirmation");
   }
 
-  function submitReview(input: ReviewInput) {
-    saveQRReview(restaurantId, {
+  async function submitReview(input: ReviewInput) {
+    await saveQRReview(restaurantId, {
       id: newId(),
       restaurantId,
       tableId,
@@ -197,7 +211,7 @@ export function QRCustomerClient({
     );
   }
 
-  if (!hasData || !data || data.menu.length === 0) {
+  if (!hasData) {
     return (
       <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
         <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">
@@ -256,11 +270,12 @@ export function QRCustomerClient({
           onInputChange={setChatInput}
           onSend={ask}
           onAddToBasket={addRecommendedToBasket}
+          sending={asking}
         />
       )}
 
       {view === "menu" && (
-        <MenuBrowser menu={data.menu} basket={basket} onAdd={addToBasket} onChangeQuantity={changeQuantity} />
+        <MenuBrowser menu={menu} basket={basket} onAdd={addToBasket} onChangeQuantity={changeQuantity} />
       )}
 
       {view === "confirmation" && lastOrder && (

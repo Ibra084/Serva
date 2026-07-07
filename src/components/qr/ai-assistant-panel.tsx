@@ -30,18 +30,20 @@ export function AiAssistantPanel({
   onInputChange,
   onSend,
   onAddToBasket,
+  sending = false,
 }: {
   messages: ChatMessage[];
   input: string;
   onInputChange: (value: string) => void;
   onSend: (question: string) => void;
   onAddToBasket: (item: MenuItem, interactionId?: string) => void;
+  sending?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length]);
+  }, [messages.length, sending]);
 
   return (
     <div className="flex flex-1 flex-col px-4 py-4">
@@ -105,6 +107,20 @@ export function AiAssistantPanel({
             </div>
           </div>
         ))}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="flex items-center gap-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                <Bot className="size-3.5" />
+              </span>
+              <div className="flex items-center gap-1 rounded-2xl rounded-tl-sm bg-secondary/70 px-3.5 py-2.5">
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground" />
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -113,7 +129,8 @@ export function AiAssistantPanel({
           <button
             key={question}
             onClick={() => onSend(question)}
-            className="rounded-full border border-border bg-card px-2.5 py-1 text-[0.7rem] font-medium text-foreground transition-colors hover:bg-secondary"
+            disabled={sending}
+            className="rounded-full border border-border bg-card px-2.5 py-1 text-[0.7rem] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
           >
             {question}
           </button>
@@ -131,12 +148,14 @@ export function AiAssistantPanel({
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           placeholder="Ask about the menu..."
-          className="flex-1 bg-transparent px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+          disabled={sending}
+          className="flex-1 bg-transparent px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
         />
         <button
           type="submit"
           aria-label="Send"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
+          disabled={sending}
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Send className="size-3.5" />
         </button>

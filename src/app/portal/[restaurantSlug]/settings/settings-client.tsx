@@ -6,8 +6,6 @@ import { Trash2, UploadCloud, CheckCircle2, Sparkles, Loader2 } from "lucide-rea
 import { PortalTopbar } from "@/components/portal/topbar";
 import { useRestaurantData } from "@/lib/use-restaurant-data";
 import { clearAllUploadBatches, clearRestaurantData, loadSampleData } from "@/lib/data-store";
-import { clearQRData } from "@/lib/qr-store";
-import { clearOpportunityStatuses } from "@/lib/opportunity-store";
 import { clearDemoData } from "@/lib/workspace-store";
 
 export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
@@ -17,20 +15,16 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
   const [reimporting, setReimporting] = useState(false);
   const [demoCleared, setDemoCleared] = useState(false);
 
-  function handleClearData() {
-    clearRestaurantData(restaurantSlug);
-    clearAllUploadBatches(restaurantSlug);
+  async function handleClearData() {
+    await clearRestaurantData(restaurantSlug);
+    await clearAllUploadBatches(restaurantSlug);
     setCleared(true);
   }
 
-  function handleClearDemoData() {
-    const removedSlugs = clearDemoData();
-    removedSlugs.forEach((slug) => {
-      clearRestaurantData(slug);
-      clearAllUploadBatches(slug);
-      clearQRData(slug);
-      clearOpportunityStatuses(slug);
-    });
+  async function handleClearDemoData() {
+    // Deleting the restaurant row cascades to all of its data in Postgres —
+    // menu/order/review/table/upload/opportunity/QR rows all FK to restaurant_id.
+    const removedSlugs = await clearDemoData();
     setDemoCleared(true);
     if (removedSlugs.includes(restaurantSlug)) {
       router.push("/portal");

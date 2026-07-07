@@ -11,7 +11,13 @@ export function useOpportunityFeed(restaurantSlug: string) {
   const [statuses, setStatuses] = useState<Record<string, OpportunityStatus>>({});
 
   useEffect(() => {
-    setStatuses(loadOpportunityStatuses(restaurantSlug));
+    let cancelled = false;
+    loadOpportunityStatuses(restaurantSlug).then((loaded) => {
+      if (!cancelled) setStatuses(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [restaurantSlug]);
 
   const generated = useMemo(() => (data ? generateOpportunityFeed(data) : []), [data]);
@@ -22,8 +28,8 @@ export function useOpportunityFeed(restaurantSlug: string) {
   );
 
   function updateStatus(id: string, status: OpportunityStatus) {
-    setOpportunityStatus(restaurantSlug, id, status);
     setStatuses((prev) => ({ ...prev, [id]: status }));
+    setOpportunityStatus(restaurantSlug, id, status);
   }
 
   return { opportunities, loading, hasData, updateStatus };

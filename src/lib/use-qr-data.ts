@@ -10,10 +10,16 @@ export function useQRData(restaurantSlug: string) {
   const [reviews, setReviews] = useState<QRReview[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(() => {
-    setInteractions(loadQRInteractions(restaurantSlug));
-    setOrders(loadQROrders(restaurantSlug));
-    setReviews(loadQRReviews(restaurantSlug));
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const [nextInteractions, nextOrders, nextReviews] = await Promise.all([
+      loadQRInteractions(restaurantSlug),
+      loadQROrders(restaurantSlug),
+      loadQRReviews(restaurantSlug),
+    ]);
+    setInteractions(nextInteractions);
+    setOrders(nextOrders);
+    setReviews(nextReviews);
     setLoading(false);
   }, [restaurantSlug]);
 

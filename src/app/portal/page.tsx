@@ -8,23 +8,25 @@ export default function PortalRootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace("/login");
-      return;
-    }
+    (async () => {
+      if (!(await isAuthenticated())) {
+        router.replace("/login");
+        return;
+      }
 
-    const active = getActiveWorkspace();
-    const workspaces = getUserWorkspaces();
+      const active = getActiveWorkspace();
+      const workspaces = await getUserWorkspaces();
 
-    if (active && workspaces.some(({ workspace }) => workspace.slug === active)) {
-      router.replace(`/portal/${active}/dashboard`);
-    } else if (workspaces.length === 1) {
-      router.replace(`/portal/${workspaces[0].workspace.slug}/dashboard`);
-    } else if (workspaces.length > 1) {
-      router.replace("/workspace-select");
-    } else {
-      router.replace("/onboarding/create-restaurant");
-    }
+      if (active && workspaces.some(({ workspace }) => workspace.slug === active)) {
+        router.replace(`/portal/${active}/dashboard`);
+      } else if (workspaces.length === 1) {
+        router.replace(`/portal/${workspaces[0].workspace.slug}/dashboard`);
+      } else if (workspaces.length > 1) {
+        router.replace("/workspace-select");
+      } else {
+        router.replace("/onboarding/create-restaurant");
+      }
+    })();
   }, [router]);
 
   return <div className="flex min-h-full flex-1 items-center justify-center bg-background" />;

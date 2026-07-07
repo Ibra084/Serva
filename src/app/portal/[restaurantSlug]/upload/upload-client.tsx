@@ -127,7 +127,7 @@ export function UploadClient({ restaurantSlug }: { restaurantSlug: string }) {
 
   const hasAnyData = stagedFiles.length > 0;
 
-  function handleConfirmImport() {
+  async function handleConfirmImport() {
     setImporting(true);
 
     const files = stagedFiles.map((staged) => staged.meta);
@@ -149,8 +149,8 @@ export function UploadClient({ restaurantSlug }: { restaurantSlug: string }) {
       },
     };
 
-    confirmUploadBatch(restaurantSlug, batch);
-    refresh();
+    await confirmUploadBatch(restaurantSlug, batch);
+    await refresh();
     setConfirmedBatch(batch);
     setStep("summary");
     setImporting(false);
@@ -162,9 +162,9 @@ export function UploadClient({ restaurantSlug }: { restaurantSlug: string }) {
     setStep("select");
   }
 
-  function handleDeleteBatch(id: string) {
-    removeUploadBatchAndRecombine(restaurantSlug, id);
-    refresh();
+  async function handleDeleteBatch(id: string) {
+    await removeUploadBatchAndRecombine(restaurantSlug, id);
+    await refresh();
   }
 
   async function handleUseSampleData() {

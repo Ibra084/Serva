@@ -273,9 +273,9 @@ export function DataExplorerClient({ restaurantSlug }: { restaurantSlug: string 
   const { data, loading, hasData } = useRestaurantData(restaurantSlug);
   const { batches, refresh } = useUploadBatches(restaurantSlug);
 
-  function handleDeleteBatch(id: string) {
-    removeUploadBatchAndRecombine(restaurantSlug, id);
-    refresh();
+  async function handleDeleteBatch(id: string) {
+    await removeUploadBatchAndRecombine(restaurantSlug, id);
+    await refresh();
   }
 
   if (loading) {

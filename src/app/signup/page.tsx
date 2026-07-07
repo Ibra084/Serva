@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthShell, AuthDivider } from "@/components/auth/auth-shell";
 import { createClient } from "@/lib/supabase/client";
-import { enableDemoSession } from "@/lib/demo-session";
-import { createDemoWorkspace, loginAsDemoUser, setCurrentUser } from "@/lib/workspace-store";
+import { createDemoWorkspace, loginAsDemoUser } from "@/lib/workspace-store";
 
 export default function SignupPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkEmail, setCheckEmail] = useState(false);
 
@@ -45,14 +45,20 @@ export default function SignupPage() {
       return;
     }
 
-    setCurrentUser({
-      id: data.user.id,
-      name: (data.user.user_metadata?.full_name as string) || data.user.email || "User",
-      email: data.user.email ?? "",
-    });
-
     router.push("/onboarding/create-restaurant");
     router.refresh();
+  }
+
+  async function handleDemo() {
+    setDemoLoading(true);
+    try {
+      await loginAsDemoUser();
+      const workspace = await createDemoWorkspace();
+      router.push(`/portal/${workspace.slug}/dashboard`);
+      router.refresh();
+    } finally {
+      setDemoLoading(false);
+    }
   }
 
   if (checkEmail) {
@@ -92,15 +98,18 @@ export default function SignupPage() {
       <Button
         type="button"
         size="lg"
+        disabled={demoLoading}
         className="h-10 w-full rounded-full text-sm"
-        onClick={() => {
-          enableDemoSession();
-          loginAsDemoUser();
-          const workspace = createDemoWorkspace();
-          router.push(`/portal/${workspace.slug}/dashboard`);
-        }}
+        onClick={handleDemo}
       >
-        Continue with demo account
+        {demoLoading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Starting demo...
+          </>
+        ) : (
+          "Continue with demo account"
+        )}
       </Button>
 
       <AuthDivider />

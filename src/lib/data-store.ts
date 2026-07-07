@@ -1,3 +1,4 @@
+import { createClient } from "@/lib/supabase/client";
 import { parseCsv, toNumber, toStrictNumber, type CsvRow } from "@/lib/csv-parser";
 import { computeDataQuality, detectFileKind, previewRows } from "@/lib/data-quality";
 import { getField } from "@/lib/field-mapping";
@@ -13,17 +14,6 @@ import type {
   UploadedFileMeta,
   UploadFileKind,
 } from "@/lib/types";
-
-const STORAGE_PREFIX = "serva_restaurant_data";
-const BATCHES_PREFIX = "serva_upload_batches";
-
-function storageKey(restaurantSlug: string) {
-  return `${STORAGE_PREFIX}_${restaurantSlug}`;
-}
-
-function batchesKey(restaurantSlug: string) {
-  return `${BATCHES_PREFIX}_${restaurantSlug}`;
-}
 
 export type { UploadFileKind };
 export { detectFileKind };
@@ -157,30 +147,106 @@ export function parseUploadedFile(
   }
 }
 
-export function saveRestaurantData(restaurantSlug: string, data: RestaurantData) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey(restaurantSlug), JSON.stringify(data));
+function num(value: unknown, fallback = 0): number {
+  if (typeof value === "number") return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function loadRestaurantData(restaurantSlug: string): RestaurantData | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(storageKey(restaurantSlug));
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as RestaurantData;
-  } catch {
-    return null;
-  }
+function emptyRestaurantData(): RestaurantData {
+  return { orders: [], menu: [], reviews: [], tables: [], importedAt: new Date().toISOString() };
 }
 
-export function clearRestaurantData(restaurantSlug: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(storageKey(restaurantSlug));
+async function resolveRestaurantId(restaurantSlug: string): Promise<string | null> {
+  const supabase = createClient();
+  const { data } = await supabase.from("restaurants").select("id").eq("slug", restaurantSlug).maybeSingle();
+  return (data?.id as string | undefined) ?? null;
 }
 
-export function hasRestaurantData(restaurantSlug: string): boolean {
-  const data = loadRestaurantData(restaurantSlug);
+/** Reads the current combined state for a restaurant directly from Postgres — always fresh, always cross-device. */
+export async function loadRestaurantData(restaurantSlug: string): Promise<RestaurantData | null> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return null;
+
+  const supabase = createClient();
+  const [menuRes, ordersRes, reviewsRes, tablesRes, latestBatchRes] = await Promise.all([
+    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId),
+    supabase.from("orders").select("*, order_items(*)").eq("restaurant_id", restaurantId),
+    supabase.from("reviews").select("*").eq("restaurant_id", restaurantId),
+    supabase.from("table_sessions").select("*").eq("restaurant_id", restaurantId),
+    supabase
+      .from("upload_batches")
+      .select("imported_at")
+      .eq("restaurant_id", restaurantId)
+      .order("imported_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const menu: MenuItem[] = (menuRes.data ?? []).map((row) => ({
+    dish: row.dish,
+    category: row.category,
+    price: num(row.price),
+    cost: num(row.cost),
+  }));
+
+  const orders: Order[] = (ordersRes.data ?? []).map((row) => ({
+    orderId: row.order_id,
+    date: row.date ?? "",
+    time: row.time ?? "",
+    customerId: row.customer_id ?? undefined,
+    tableId: row.table_id ?? undefined,
+    total: num(row.total),
+    items: ((row.order_items ?? []) as Record<string, unknown>[]).map((item) => ({
+      dish: item.dish as string,
+      category: item.category as string,
+      quantity: num(item.quantity),
+      price: num(item.price),
+      total: num(item.total),
+      revenue: num(item.revenue),
+      cost: num(item.cost),
+    })),
+  }));
+
+  const reviews: Review[] = (reviewsRes.data ?? []).map((row) => ({
+    reviewId: row.review_id,
+    date: row.date ?? "",
+    rating: num(row.rating),
+    text: row.text ?? "",
+    guestName: row.guest_name ?? undefined,
+  }));
+
+  const tables: TableSession[] = (tablesRes.data ?? []).map((row) => ({
+    tableId: row.table_id,
+    date: row.date ?? "",
+    seatedTime: row.seated_time ?? "",
+    clearedTime: row.cleared_time ?? "",
+    guests: num(row.guests),
+  }));
+
+  return {
+    menu,
+    orders,
+    reviews,
+    tables,
+    importedAt: (latestBatchRes.data?.imported_at as string | undefined) ?? new Date().toISOString(),
+  };
+}
+
+export async function clearRestaurantData(restaurantSlug: string): Promise<void> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return;
+  const supabase = createClient();
+  await Promise.all([
+    supabase.from("menu_items").delete().eq("restaurant_id", restaurantId),
+    supabase.from("orders").delete().eq("restaurant_id", restaurantId),
+    supabase.from("reviews").delete().eq("restaurant_id", restaurantId),
+    supabase.from("table_sessions").delete().eq("restaurant_id", restaurantId),
+  ]);
+}
+
+export async function hasRestaurantData(restaurantSlug: string): Promise<boolean> {
+  const data = await loadRestaurantData(restaurantSlug);
   if (!data) return false;
   return data.orders.length > 0 || data.menu.length > 0 || data.reviews.length > 0;
 }
@@ -202,77 +268,197 @@ export function aggregateQuality(files: UploadedFileMeta[]): DataQualityReport {
   };
 }
 
-export function loadUploadBatches(restaurantSlug: string): UploadBatch[] {
-  if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(batchesKey(restaurantSlug));
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as UploadBatch[]) : [];
-  } catch {
-    return [];
+/** Upload history for the "Uploads" tab — provenance only (files/quality/status), never the row data. */
+export async function loadUploadBatches(restaurantSlug: string): Promise<UploadBatch[]> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return [];
+
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("upload_batches")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("imported_at", { ascending: false });
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    importedAt: row.imported_at,
+    files: row.files as UploadedFileMeta[],
+    status: row.status as UploadBatch["status"],
+    quality: row.quality as DataQualityReport,
+    data: { orders: [], menu: [], reviews: [], tables: [] },
+  }));
+}
+
+export async function deleteUploadBatch(restaurantSlug: string, id: string): Promise<void> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return;
+  const supabase = createClient();
+  await supabase.from("upload_batches").delete().eq("id", id).eq("restaurant_id", restaurantId);
+}
+
+/** Deletes a batch and every row it contributed, then returns the recombined current state. */
+export async function removeUploadBatchAndRecombine(restaurantSlug: string, id: string): Promise<RestaurantData> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return emptyRestaurantData();
+
+  const supabase = createClient();
+  await Promise.all([
+    supabase.from("menu_items").delete().eq("restaurant_id", restaurantId).eq("source_batch_id", id),
+    supabase.from("orders").delete().eq("restaurant_id", restaurantId).eq("source_batch_id", id),
+    supabase.from("reviews").delete().eq("restaurant_id", restaurantId).eq("source_batch_id", id),
+    supabase.from("table_sessions").delete().eq("restaurant_id", restaurantId).eq("source_batch_id", id),
+  ]);
+  await supabase.from("upload_batches").delete().eq("id", id).eq("restaurant_id", restaurantId);
+
+  return (await loadRestaurantData(restaurantSlug)) ?? emptyRestaurantData();
+}
+
+/** Removes upload history only — the underlying menu/order/review/table rows are untouched. */
+export async function clearAllUploadBatches(restaurantSlug: string): Promise<void> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return;
+  const supabase = createClient();
+  await supabase.from("upload_batches").delete().eq("restaurant_id", restaurantId);
+}
+
+type SupabaseClient = ReturnType<typeof createClient>;
+
+async function upsertMenuItems(
+  supabase: SupabaseClient,
+  restaurantId: string,
+  menu: MenuItem[],
+  batchId: string
+) {
+  if (menu.length === 0) return;
+  const rows = menu.map((item) => ({
+    restaurant_id: restaurantId,
+    dish: item.dish,
+    category: item.category,
+    price: item.price,
+    cost: item.cost,
+    source_batch_id: batchId,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase.from("menu_items").upsert(rows, { onConflict: "restaurant_id,dish" });
+  if (error) throw error;
+}
+
+async function upsertOrders(supabase: SupabaseClient, restaurantId: string, orders: Order[], batchId: string) {
+  if (orders.length === 0) return;
+
+  const rows = orders.map((order) => ({
+    restaurant_id: restaurantId,
+    order_id: order.orderId,
+    date: order.date,
+    time: order.time,
+    customer_id: order.customerId ?? null,
+    table_id: order.tableId ?? null,
+    total: order.total,
+    source_batch_id: batchId,
+  }));
+
+  const { data, error } = await supabase
+    .from("orders")
+    .upsert(rows, { onConflict: "restaurant_id,order_id" })
+    .select("id, order_id");
+  if (error) throw error;
+
+  const idByOrderId = new Map((data ?? []).map((row) => [row.order_id as string, row.id as string]));
+  const orderDbIds = Array.from(idByOrderId.values());
+  if (orderDbIds.length > 0) {
+    const { error: deleteError } = await supabase.from("order_items").delete().in("order_id", orderDbIds);
+    if (deleteError) throw deleteError;
+  }
+
+  const itemRows = orders.flatMap((order) => {
+    const orderDbId = idByOrderId.get(order.orderId);
+    if (!orderDbId) return [];
+    return order.items.map((item) => ({
+      order_id: orderDbId,
+      restaurant_id: restaurantId,
+      dish: item.dish,
+      category: item.category,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+      revenue: item.revenue,
+      cost: item.cost,
+    }));
+  });
+  if (itemRows.length > 0) {
+    const { error: itemsError } = await supabase.from("order_items").insert(itemRows);
+    if (itemsError) throw itemsError;
   }
 }
 
-function persistBatches(restaurantSlug: string, batches: UploadBatch[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(batchesKey(restaurantSlug), JSON.stringify(batches));
+async function upsertReviews(supabase: SupabaseClient, restaurantId: string, reviews: Review[], batchId: string) {
+  if (reviews.length === 0) return;
+  const rows = reviews.map((review) => ({
+    restaurant_id: restaurantId,
+    review_id: review.reviewId,
+    date: review.date,
+    rating: review.rating,
+    text: review.text,
+    guest_name: review.guestName ?? null,
+    source_batch_id: batchId,
+  }));
+  const { error } = await supabase.from("reviews").upsert(rows, { onConflict: "restaurant_id,review_id" });
+  if (error) throw error;
 }
 
-export function saveUploadBatch(restaurantSlug: string, batch: UploadBatch) {
-  const batches = loadUploadBatches(restaurantSlug).filter((existing) => existing.id !== batch.id);
-  persistBatches(restaurantSlug, [batch, ...batches]);
+async function upsertTableSessions(
+  supabase: SupabaseClient,
+  restaurantId: string,
+  tables: TableSession[],
+  batchId: string
+) {
+  if (tables.length === 0) return;
+  const rows = tables.map((table) => ({
+    restaurant_id: restaurantId,
+    table_id: table.tableId,
+    date: table.date,
+    seated_time: table.seatedTime,
+    cleared_time: table.clearedTime,
+    guests: table.guests,
+    source_batch_id: batchId,
+  }));
+  const { error } = await supabase
+    .from("table_sessions")
+    .upsert(rows, { onConflict: "restaurant_id,table_id,date,seated_time" });
+  if (error) throw error;
 }
 
-export function deleteUploadBatch(restaurantSlug: string, id: string) {
-  persistBatches(restaurantSlug, loadUploadBatches(restaurantSlug).filter((batch) => batch.id !== id));
-}
+/** The core write path: records the batch, then upserts every row it contains, tagged with its batch id. */
+export async function confirmUploadBatch(restaurantSlug: string, batch: UploadBatch): Promise<RestaurantData> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) throw new Error(`Unknown restaurant: ${restaurantSlug}`);
 
-export function removeUploadBatchAndRecombine(restaurantSlug: string, id: string): RestaurantData {
-  deleteUploadBatch(restaurantSlug, id);
-  const combined = combineBatches(loadUploadBatches(restaurantSlug));
-  saveRestaurantData(restaurantSlug, combined);
-  return combined;
-}
+  const supabase = createClient();
+  const { data: batchRow, error: batchError } = await supabase
+    .from("upload_batches")
+    .insert({
+      restaurant_id: restaurantId,
+      name: batch.name,
+      status: batch.status,
+      quality: batch.quality,
+      files: batch.files,
+      imported_at: batch.importedAt,
+    })
+    .select("id")
+    .single();
+  if (batchError) throw batchError;
+  const batchId = batchRow.id as string;
 
-export function clearAllUploadBatches(restaurantSlug: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(batchesKey(restaurantSlug));
-}
-
-export function combineBatches(batches: UploadBatch[]): RestaurantData {
-  const usable = batches.filter((batch) => batch.status !== "failed");
-
-  const orders = new Map<string, Order>();
-  const menu = new Map<string, MenuItem>();
-  const reviews = new Map<string, Review>();
-  const tables = new Map<string, TableSession>();
-  let latestImportedAt = "";
-
-  for (const batch of usable) {
-    if (batch.importedAt > latestImportedAt) latestImportedAt = batch.importedAt;
-    for (const order of batch.data.orders) orders.set(order.orderId, order);
-    for (const item of batch.data.menu) menu.set(item.dish, item);
-    for (const review of batch.data.reviews) reviews.set(review.reviewId, review);
-    for (const table of batch.data.tables) {
-      tables.set(`${table.tableId}::${table.date}::${table.seatedTime}`, table);
-    }
+  if (batch.status !== "failed") {
+    await upsertMenuItems(supabase, restaurantId, batch.data.menu, batchId);
+    await upsertOrders(supabase, restaurantId, batch.data.orders, batchId);
+    await upsertReviews(supabase, restaurantId, batch.data.reviews, batchId);
+    await upsertTableSessions(supabase, restaurantId, batch.data.tables, batchId);
   }
 
-  return {
-    orders: Array.from(orders.values()),
-    menu: Array.from(menu.values()),
-    reviews: Array.from(reviews.values()),
-    tables: Array.from(tables.values()),
-    importedAt: latestImportedAt || new Date().toISOString(),
-  };
-}
-
-export function confirmUploadBatch(restaurantSlug: string, batch: UploadBatch): RestaurantData {
-  saveUploadBatch(restaurantSlug, batch);
-  const combined = combineBatches(loadUploadBatches(restaurantSlug));
-  saveRestaurantData(restaurantSlug, combined);
-  return combined;
+  return (await loadRestaurantData(restaurantSlug)) ?? emptyRestaurantData();
 }
 
 const SAMPLE_FILES: Record<"orders" | "menu" | "reviews" | "tables", string> = {

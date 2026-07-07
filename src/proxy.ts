@@ -27,9 +27,7 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isDemoSession = request.cookies.get("serva_demo")?.value === "1";
-
-  if (!user && !isDemoSession) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

@@ -17,10 +17,16 @@ export function useWorkspace(restaurantSlug: string) {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(() => {
-    setUser(getCurrentUser());
-    setWorkspace(getWorkspaceBySlug(restaurantSlug));
-    setMembership(getMembershipForSlug(restaurantSlug));
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const [currentUser, currentWorkspace, currentMembership] = await Promise.all([
+      getCurrentUser(),
+      getWorkspaceBySlug(restaurantSlug),
+      getMembershipForSlug(restaurantSlug),
+    ]);
+    setUser(currentUser);
+    setWorkspace(currentWorkspace);
+    setMembership(currentMembership);
     setLoading(false);
   }, [restaurantSlug]);
 
@@ -39,9 +45,17 @@ export function useUserWorkspaces() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setUser(getCurrentUser());
-    setWorkspaces(getUserWorkspaces());
-    setLoading(false);
+    let cancelled = false;
+    (async () => {
+      const [currentUser, userWorkspaces] = await Promise.all([getCurrentUser(), getUserWorkspaces()]);
+      if (cancelled) return;
+      setUser(currentUser);
+      setWorkspaces(userWorkspaces);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return { user, workspaces, loading };

@@ -29,17 +29,19 @@ export default function CreateRestaurantPage() {
   const [creatingDemo, setCreatingDemo] = useState(false);
 
   useEffect(() => {
-    if (!getCurrentUser()) {
-      router.replace("/login");
-    }
+    (async () => {
+      if (!(await getCurrentUser())) {
+        router.replace("/login");
+      }
+    })();
   }, [router]);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
 
     const formData = new FormData(event.currentTarget);
-    const workspace = createRestaurantWorkspace({
+    const workspace = await createRestaurantWorkspace({
       name: String(formData.get("name")),
       location: String(formData.get("location")),
       cuisine: String(formData.get("cuisine")),
@@ -53,9 +55,9 @@ export default function CreateRestaurantPage() {
     router.refresh();
   }
 
-  function handleUseDemoRestaurant() {
+  async function handleUseDemoRestaurant() {
     setCreatingDemo(true);
-    const workspace = createDemoWorkspace();
+    const workspace = await createDemoWorkspace();
     router.push(`/portal/${workspace.slug}/dashboard`);
     router.refresh();
   }

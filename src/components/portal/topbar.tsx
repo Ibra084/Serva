@@ -2,8 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { Search, Sparkles, EyeOff, Bell, LogOut, User as UserIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
-import { clearDemoSession } from "@/lib/demo-session";
 import { logout as logoutWorkspace } from "@/lib/workspace-store";
 import { useWorkspace } from "@/lib/use-workspace";
 import { AIBriefTrigger } from "@/components/portal/ai-brief-trigger";
@@ -29,10 +27,7 @@ export function PortalTopbar({ restaurantSlug }: { restaurantSlug: string }) {
   const initial = (user?.name ?? "U").charAt(0).toUpperCase();
 
   async function handleLogout() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    clearDemoSession();
-    logoutWorkspace();
+    await logoutWorkspace();
     router.push("/login");
     router.refresh();
   }
