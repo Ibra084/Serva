@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
 import type { QRInteraction, QROrder, QROrderStatus, QRReview } from "@/lib/types";
 
+function newId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function num(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
   const parsed = Number(value);
@@ -74,27 +80,29 @@ export async function saveQROrder(restaurantSlug: string, order: QROrder): Promi
   const restaurantId = await resolveRestaurantId(restaurantSlug);
   if (!restaurantId) return;
 
+  // Generates the primary key client-side and inserts it explicitly, rather than reading it
+  // back via `.select()` — anonymous customers have no SELECT policy on qr_orders (by design,
+  // so they can't read other customers' orders), and Postgres RLS requires a satisfied SELECT
+  // policy for INSERT...RETURNING, which would otherwise fail with a misleading RLS error.
+  const orderRowId = newId();
   const supabase = createClient();
-  const { data: orderRow, error } = await supabase
-    .from("qr_orders")
-    .insert({
-      restaurant_id: restaurantId,
-      order_id: order.orderId,
-      table_id: order.tableId,
-      subtotal: order.subtotal,
-      ai_recommended_items: order.aiRecommendedItems,
-      special_requests: order.specialRequests,
-      status: order.status,
-      created_at: order.timestamp,
-    })
-    .select("id")
-    .single();
-  if (error || !orderRow) return;
+  const { error } = await supabase.from("qr_orders").insert({
+    id: orderRowId,
+    restaurant_id: restaurantId,
+    order_id: order.orderId,
+    table_id: order.tableId,
+    subtotal: order.subtotal,
+    ai_recommended_items: order.aiRecommendedItems,
+    special_requests: order.specialRequests,
+    status: order.status,
+    created_at: order.timestamp,
+  });
+  if (error) return;
 
   if (order.items.length > 0) {
     await supabase.from("qr_order_items").insert(
       order.items.map((item) => ({
-        qr_order_id: orderRow.id,
+        qr_order_id: orderRowId,
         dish: item.dish,
         category: item.category,
         price: item.price,
