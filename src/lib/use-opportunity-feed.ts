@@ -1,26 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { generateOpportunityFeed } from "@/lib/opportunity-feed";
-import { loadOpportunityStatuses, setOpportunityStatus } from "@/lib/opportunity-store";
-import { useRestaurantData } from "@/lib/use-restaurant-data";
+import { setOpportunityStatus } from "@/lib/opportunity-store";
+import { usePortalData } from "@/lib/portal-cache";
 import type { OpportunityStatus } from "@/lib/types";
 
 export function useOpportunityFeed(restaurantSlug: string) {
-  const { data, loading, hasData } = useRestaurantData(restaurantSlug);
-  const [statuses, setStatuses] = useState<Record<string, OpportunityStatus>>({});
+  const { data, loading, hasData, updateOptimistic } = usePortalData();
+  const statuses = data.opportunityStatuses;
 
-  useEffect(() => {
-    let cancelled = false;
-    loadOpportunityStatuses(restaurantSlug).then((loaded) => {
-      if (!cancelled) setStatuses(loaded);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantSlug]);
-
-  const generated = useMemo(() => (data ? generateOpportunityFeed(data) : []), [data]);
+  const generated = useMemo(() => (data.restaurant ? generateOpportunityFeed(data.restaurant) : []), [data.restaurant]);
 
   const opportunities = useMemo(
     () => generated.map((item) => ({ ...item, status: statuses[item.id] ?? item.status })),
@@ -28,7 +18,7 @@ export function useOpportunityFeed(restaurantSlug: string) {
   );
 
   function updateStatus(id: string, status: OpportunityStatus) {
-    setStatuses((prev) => ({ ...prev, [id]: status }));
+    updateOptimistic((prev) => ({ ...prev, opportunityStatuses: { ...prev.opportunityStatuses, [id]: status } }));
     setOpportunityStatus(restaurantSlug, id, status);
   }
 

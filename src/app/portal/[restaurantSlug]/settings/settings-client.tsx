@@ -2,23 +2,39 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, UploadCloud, CheckCircle2, Sparkles, Loader2 } from "lucide-react";
+import { Trash2, UploadCloud, CheckCircle2, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { useRestaurantData } from "@/lib/use-restaurant-data";
+import { usePortalData } from "@/lib/portal-cache";
 import { clearAllUploadBatches, clearRestaurantData, loadSampleData } from "@/lib/data-store";
 import { clearDemoData } from "@/lib/workspace-store";
 
 export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
   const router = useRouter();
   const { data, hasData } = useRestaurantData(restaurantSlug);
+  const { updateOptimistic, refresh } = usePortalData();
   const [cleared, setCleared] = useState(false);
+  const [clearError, setClearError] = useState(false);
   const [reimporting, setReimporting] = useState(false);
   const [demoCleared, setDemoCleared] = useState(false);
 
   async function handleClearData() {
-    await clearRestaurantData(restaurantSlug);
-    await clearAllUploadBatches(restaurantSlug);
+    setClearError(false);
+    updateOptimistic((prev) => ({
+      ...prev,
+      restaurant: prev.restaurant
+        ? { ...prev.restaurant, menu: [], orders: [], reviews: [], tables: [] }
+        : prev.restaurant,
+      uploadBatches: [],
+    }));
     setCleared(true);
+    try {
+      await Promise.all([clearRestaurantData(restaurantSlug), clearAllUploadBatches(restaurantSlug)]);
+    } catch {
+      setCleared(false);
+      setClearError(true);
+      await refresh();
+    }
   }
 
   async function handleClearDemoData() {
@@ -36,7 +52,7 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
     setCleared(false);
     try {
       await loadSampleData(restaurantSlug);
-      router.refresh();
+      await refresh();
     } finally {
       setReimporting(false);
     }
@@ -111,7 +127,13 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
             {cleared && (
               <p className="mt-3 flex items-center gap-1.5 text-sm text-primary">
                 <CheckCircle2 className="size-4" />
-                All imported data and upload history cleared. Refresh or upload new data to continue.
+                All imported data and upload history cleared.
+              </p>
+            )}
+            {clearError && (
+              <p className="mt-3 flex items-center gap-1.5 text-sm text-destructive">
+                <AlertTriangle className="size-4" />
+                Couldn&rsquo;t clear your data. Please try again.
               </p>
             )}
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, Copy, Download, ExternalLink, Palette, QrCode, UtensilsCrossed } from "lucide-react";
@@ -8,7 +8,7 @@ import { PortalTopbar } from "@/components/portal/topbar";
 import { PortalEmptyState } from "@/components/portal/empty-state";
 import { Select } from "@/components/ui/select";
 import { useRestaurantData } from "@/lib/use-restaurant-data";
-import { loadMenuAppearance } from "@/lib/menu-appearance-store";
+import { usePortalData } from "@/lib/portal-cache";
 
 const DEFAULT_TABLES = ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08"];
 
@@ -69,12 +69,9 @@ function CopyButton({ value }: { value: string }) {
 
 export function QrClient({ restaurantSlug }: { restaurantSlug: string }) {
   const { data, loading, hasData } = useRestaurantData(restaurantSlug);
+  const { data: portalData } = usePortalData();
   const svgRef = useRef<SVGSVGElement>(null);
-  const [isBooklet, setIsBooklet] = useState(false);
-
-  useEffect(() => {
-    loadMenuAppearance(restaurantSlug).then((appearance) => setIsBooklet(appearance.layout === "booklet"));
-  }, [restaurantSlug]);
+  const isBooklet = portalData.menuAppearance.layout === "booklet";
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const restaurantUrl = `${origin}/qr/${restaurantSlug}`;

@@ -63,13 +63,17 @@ function OrdersTab({ data }: { data: NonNullable<ReturnType<typeof useRestaurant
   const tables = useUniqueValues(rows, (row) => row.table);
   const customers = useUniqueValues(rows, (row) => row.customer);
 
-  const filtered = rows.filter(
-    (row) =>
-      (dateFilter === "all" || row.date === dateFilter) &&
-      (categoryFilter === "all" || row.category === categoryFilter) &&
-      (dishFilter === "all" || row.dish === dishFilter) &&
-      (tableFilter === "all" || row.table === tableFilter) &&
-      (customerFilter === "all" || row.customer === customerFilter)
+  const filtered = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          (dateFilter === "all" || row.date === dateFilter) &&
+          (categoryFilter === "all" || row.category === categoryFilter) &&
+          (dishFilter === "all" || row.dish === dishFilter) &&
+          (tableFilter === "all" || row.table === tableFilter) &&
+          (customerFilter === "all" || row.customer === customerFilter)
+      ),
+    [rows, dateFilter, categoryFilter, dishFilter, tableFilter, customerFilter]
   );
 
   return (

@@ -1,45 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { loadRestaurantData, loadUploadBatches } from "@/lib/data-store";
+import { useEffect, useState } from "react";
+import { usePortalData } from "@/lib/portal-cache";
 import { DEFAULT_MENU_APPEARANCE, type MenuAppearanceSettings, type MenuCategory } from "@/lib/menu-types";
-import type { MenuItem, Order, RestaurantData, UploadBatch } from "@/lib/types";
+import type { MenuItem, Order } from "@/lib/types";
 
+/** Reads the shared portal cache (see lib/portal-cache.tsx) — no independent fetch, no refetch on every mount. */
 export function useRestaurantData(restaurantSlug: string) {
-  const [data, setData] = useState<RestaurantData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const result = await loadRestaurantData(restaurantSlug);
-    setData(result);
-    setLoading(false);
-  }, [restaurantSlug]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const hasData = Boolean(data && (data.orders.length > 0 || data.menu.length > 0 || data.reviews.length > 0));
-
-  return { data, loading, hasData, refresh };
+  void restaurantSlug;
+  const { data, loading, hasData, refresh } = usePortalData();
+  return { data: data.restaurant, loading, hasData, refresh };
 }
 
 export function useUploadBatches(restaurantSlug: string) {
-  const [batches, setBatches] = useState<UploadBatch[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    const result = await loadUploadBatches(restaurantSlug);
-    setBatches(result);
-    setLoading(false);
-  }, [restaurantSlug]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { batches, loading, refresh };
+  void restaurantSlug;
+  const { data, loading, refresh } = usePortalData();
+  return { batches: data.uploadBatches, loading, refresh };
 }
 
 /** Public, unauthenticated menu read for the QR customer flow — fetches via the server API route rather than direct Supabase access. */

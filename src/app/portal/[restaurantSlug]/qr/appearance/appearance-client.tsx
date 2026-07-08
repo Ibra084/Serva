@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Loader2, Palette } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { loadMenuAppearance, saveMenuAppearance } from "@/lib/menu-appearance-store";
+import { saveMenuAppearance } from "@/lib/menu-appearance-store";
+import { usePortalData } from "@/lib/portal-cache";
 import { DEFAULT_MENU_APPEARANCE, type CategoryDisplay, type MenuAppearanceSettings, type MenuLayout } from "@/lib/menu-types";
 
 const LAYOUT_OPTIONS: { value: MenuLayout; label: string; description: string }[] = [
@@ -32,24 +33,27 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
 }
 
 export function AppearanceClient({ restaurantSlug }: { restaurantSlug: string }) {
+  const { data: portalData, loading: portalLoading, updateOptimistic } = usePortalData();
   const [settings, setSettings] = useState<MenuAppearanceSettings>(DEFAULT_MENU_APPEARANCE);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const initialized = useRef(false);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const previewUrl = `${origin}/qr/${restaurantSlug}`;
   const previewLabel = settings.layout === "booklet" ? "Preview Booklet Menu" : "Preview Customer Menu";
+  const loading = portalLoading && !initialized.current;
 
   useEffect(() => {
-    loadMenuAppearance(restaurantSlug).then((result) => {
-      setSettings(result);
-      setLoading(false);
-    });
-  }, [restaurantSlug]);
+    if (!portalLoading && !initialized.current) {
+      setSettings(portalData.menuAppearance);
+      initialized.current = true;
+    }
+  }, [portalLoading, portalData.menuAppearance]);
 
   async function handleSave() {
     setSaving(true);
+    updateOptimistic((prev) => ({ ...prev, menuAppearance: settings }));
     await saveMenuAppearance(restaurantSlug, settings);
     setSaving(false);
     setSaved(true);

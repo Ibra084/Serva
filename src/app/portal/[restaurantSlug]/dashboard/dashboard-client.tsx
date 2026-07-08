@@ -64,13 +64,20 @@ export function DashboardClient({ restaurantSlug }: { restaurantSlug: string }) 
   const quantitySold = useMemo(() => (data ? rankMenuByQuantity(data).slice(0, 5) : []), [data]);
   const guestInsights = useMemo(() => (data ? calculateGuestInsights(data) : null), [data]);
 
-  const dataQualityAvg =
-    batches.length > 0
-      ? Math.round(batches.reduce((sum, batch) => sum + batch.quality.score, 0) / batches.length)
-      : null;
-  const qualityIssues = batches
-    .filter((batch) => batch.status !== "processed")
-    .flatMap((batch) => [...batch.quality.errors, ...batch.quality.warnings].map((message) => ({ batch: batch.name, message })));
+  const dataQualityAvg = useMemo(
+    () =>
+      batches.length > 0
+        ? Math.round(batches.reduce((sum, batch) => sum + batch.quality.score, 0) / batches.length)
+        : null,
+    [batches]
+  );
+  const qualityIssues = useMemo(
+    () =>
+      batches
+        .filter((batch) => batch.status !== "processed")
+        .flatMap((batch) => [...batch.quality.errors, ...batch.quality.warnings].map((message) => ({ batch: batch.name, message }))),
+    [batches]
+  );
 
   const hourlyRevenue = useMemo(() => {
     if (!data || data.orders.length === 0) return undefined;

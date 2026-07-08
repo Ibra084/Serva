@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Membership, RestaurantWorkspace } from "@/lib/types";
 
-function navItems(restaurantSlug: string) {
+export function navItems(restaurantSlug: string) {
   const base = `/portal/${restaurantSlug}`;
   return [
     { label: "Dashboard", href: `${base}/dashboard`, icon: LayoutDashboard },
@@ -64,7 +64,7 @@ export function PortalSidebar({
   const initial = (workspace?.name ?? "S").charAt(0).toUpperCase();
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col bg-card px-4 py-5 lg:flex">
+    <aside className="hidden h-full w-64 shrink-0 flex-col bg-card px-4 py-5 lg:flex">
       <button
         onClick={() => router.push("/workspace-select")}
         className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-secondary"
@@ -92,13 +92,14 @@ export function PortalSidebar({
         </span>
       )}
 
-      <nav className="mt-4 flex flex-col gap-0.5">
+      <nav className="mt-4 flex flex-1 flex-col gap-0.5 overflow-y-auto">
         {navItems(restaurantSlug).map((item) => {
           const active = item.href === pathname;
           return (
             <Link
               key={item.label}
               href={item.href}
+              prefetch={true}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 active
