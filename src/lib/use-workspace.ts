@@ -10,32 +10,89 @@ import {
 } from "@/lib/workspace-store";
 import type { Membership, RestaurantWorkspace, User } from "@/lib/types";
 
-/** Resolves the active restaurant workspace + the current user's membership in it. */
+interface WorkspaceData {
+  user: User | null;
+  workspace: RestaurantWorkspace | null;
+  membership: Membership | null;
+}
+
+interface WorkspaceCacheEntry {
+  data?: WorkspaceData;
+  promise?: Promise<WorkspaceData>;
+  listeners: Set<(data: WorkspaceData) => void>;
+}
+
+const workspaceCache = new Map<string, WorkspaceCacheEntry>();
+
+function getCacheEntry(restaurantSlug: string): WorkspaceCacheEntry {
+  let entry = workspaceCache.get(restaurantSlug);
+  if (!entry) {
+    entry = { listeners: new Set() };
+    workspaceCache.set(restaurantSlug, entry);
+  }
+  return entry;
+}
+
+/** Fetches (or reuses an in-flight fetch of) the workspace data for a slug, notifying all subscribers once resolved. */
+function fetchWorkspace(restaurantSlug: string): Promise<WorkspaceData> {
+  const entry = getCacheEntry(restaurantSlug);
+  if (entry.promise) return entry.promise;
+
+  entry.promise = Promise.all([
+    getCurrentUser(),
+    getWorkspaceBySlug(restaurantSlug),
+    getMembershipForSlug(restaurantSlug),
+  ]).then(([user, workspace, membership]) => {
+    const data: WorkspaceData = { user, workspace, membership };
+    entry.data = data;
+    entry.promise = undefined;
+    for (const listener of entry.listeners) listener(data);
+    return data;
+  });
+
+  return entry.promise;
+}
+
+/** Resolves the active restaurant workspace + the current user's membership in it. Shares one fetch per slug across every caller (e.g. shell + topbar). */
 export function useWorkspace(restaurantSlug: string) {
-  const [user, setUser] = useState<User | null>(null);
-  const [workspace, setWorkspace] = useState<RestaurantWorkspace | null>(null);
-  const [membership, setMembership] = useState<Membership | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cached = workspaceCache.get(restaurantSlug)?.data;
+  const [data, setData] = useState<WorkspaceData | null>(cached ?? null);
+  const [loading, setLoading] = useState(!cached);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const [currentUser, currentWorkspace, currentMembership] = await Promise.all([
-      getCurrentUser(),
-      getWorkspaceBySlug(restaurantSlug),
-      getMembershipForSlug(restaurantSlug),
-    ]);
-    setUser(currentUser);
-    setWorkspace(currentWorkspace);
-    setMembership(currentMembership);
+    const entry = getCacheEntry(restaurantSlug);
+    entry.data = undefined;
+    entry.promise = undefined;
+    const result = await fetchWorkspace(restaurantSlug);
+    setData(result);
     setLoading(false);
   }, [restaurantSlug]);
 
   useEffect(() => {
-    refresh();
     setActiveWorkspace(restaurantSlug);
-  }, [refresh, restaurantSlug]);
 
-  return { user, workspace, membership, loading, refresh };
+    const entry = getCacheEntry(restaurantSlug);
+    const listener = (result: WorkspaceData) => {
+      setData(result);
+      setLoading(false);
+    };
+    entry.listeners.add(listener);
+
+    if (entry.data) {
+      setData(entry.data);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      fetchWorkspace(restaurantSlug).then(listener);
+    }
+
+    return () => {
+      entry.listeners.delete(listener);
+    };
+  }, [restaurantSlug]);
+
+  return { user: data?.user ?? null, workspace: data?.workspace ?? null, membership: data?.membership ?? null, loading, refresh };
 }
 
 /** All restaurant workspaces the current user belongs to — for the workspace switcher. */

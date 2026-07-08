@@ -14,10 +14,23 @@ function num(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-async function resolveRestaurantId(restaurantSlug: string): Promise<string | null> {
-  const supabase = createClient();
-  const { data } = await supabase.from("restaurants").select("id").eq("slug", restaurantSlug).maybeSingle();
-  return (data?.id as string | undefined) ?? null;
+const restaurantIdCache = new Map<string, Promise<string | null>>();
+
+function resolveRestaurantId(restaurantSlug: string): Promise<string | null> {
+  const cached = restaurantIdCache.get(restaurantSlug);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const supabase = createClient();
+    const { data } = await supabase.from("restaurants").select("id").eq("slug", restaurantSlug).maybeSingle();
+    return (data?.id as string | undefined) ?? null;
+  })().then((id) => {
+    if (!id) restaurantIdCache.delete(restaurantSlug);
+    return id;
+  });
+
+  restaurantIdCache.set(restaurantSlug, promise);
+  return promise;
 }
 
 function rowToMenuItem(row: Record<string, unknown>): MenuItem {
@@ -45,19 +58,25 @@ function rowToMenuItem(row: Record<string, unknown>): MenuItem {
   };
 }
 
+export interface MenuBuilderResult<T> {
+  data: T;
+  error: string | null;
+}
+
 /** Owner-portal read — every item including hidden/unavailable ones, full field set, for the Menu Builder editor. */
-export async function loadMenuBuilderItems(restaurantSlug: string): Promise<MenuItem[]> {
+export async function loadMenuBuilderItems(restaurantSlug: string): Promise<MenuBuilderResult<MenuItem[]>> {
   const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return [];
+  if (!restaurantId) return { data: [], error: "Restaurant not found." };
 
   const supabase = createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("menu_items")
     .select("*")
     .eq("restaurant_id", restaurantId)
     .order("display_order", { ascending: true });
 
-  return (data ?? []).map(rowToMenuItem);
+  if (error) return { data: [], error: error.message };
+  return { data: (data ?? []).map(rowToMenuItem), error: null };
 }
 
 export type MenuItemDraft = Omit<MenuItem, "id">;
@@ -153,18 +172,22 @@ export async function reorderMenuItems(restaurantSlug: string, orderedIds: strin
   );
 }
 
-export async function loadMenuCategories(restaurantSlug: string): Promise<MenuCategory[]> {
+export async function loadMenuCategories(restaurantSlug: string): Promise<MenuBuilderResult<MenuCategory[]>> {
   const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return [];
+  if (!restaurantId) return { data: [], error: "Restaurant not found." };
 
   const supabase = createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("menu_categories")
     .select("*")
     .eq("restaurant_id", restaurantId)
     .order("display_order", { ascending: true });
 
-  return (data ?? []).map((row) => ({ name: row.name as string, displayOrder: num(row.display_order, 0) }));
+  if (error) return { data: [], error: error.message };
+  return {
+    data: (data ?? []).map((row) => ({ name: row.name as string, displayOrder: num(row.display_order, 0) })),
+    error: null,
+  };
 }
 
 /** Creates the category row if it doesn't exist yet (e.g. when an item is assigned a brand-new category name). */
@@ -243,4 +266,78 @@ export async function deleteCategory(restaurantSlug: string, name: string): Prom
     .eq("restaurant_id", restaurantId)
     .eq("category", name);
   await supabase.from("menu_categories").delete().eq("restaurant_id", restaurantId).eq("name", name);
+}
+
+export interface BulkMenuItemInput {
+  category: string;
+  dish: string;
+  price: number;
+  description?: string;
+}
+
+/** Batch-imports items (bulk paste / templates): upserts every distinct category once, then inserts all items with sequential display_order per category. */
+export async function bulkCreateMenuItems(
+  restaurantSlug: string,
+  inputItems: BulkMenuItemInput[]
+): Promise<MenuBuilderResult<MenuItem[]>> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return { data: [], error: "Restaurant not found." };
+  if (inputItems.length === 0) return { data: [], error: null };
+
+  const supabase = createClient();
+
+  const categoryNames = Array.from(new Set(inputItems.map((item) => item.category.trim()).filter(Boolean)));
+  const { data: existingCategories } = await supabase
+    .from("menu_categories")
+    .select("name, display_order")
+    .eq("restaurant_id", restaurantId);
+  const existingNames = new Set((existingCategories ?? []).map((row) => row.name as string));
+  let nextOrder =
+    (existingCategories ?? []).reduce((max, row) => Math.max(max, num(row.display_order, 0)), -1) + 1;
+  const newCategoryRows = categoryNames
+    .filter((name) => !existingNames.has(name))
+    .map((name) => ({ restaurant_id: restaurantId, name, display_order: nextOrder++ }));
+  if (newCategoryRows.length > 0) {
+    const { error: categoryError } = await supabase.from("menu_categories").insert(newCategoryRows);
+    if (categoryError) return { data: [], error: categoryError.message };
+  }
+
+  const { data: existingItemCounts } = await supabase
+    .from("menu_items")
+    .select("category, display_order")
+    .eq("restaurant_id", restaurantId);
+  const nextItemOrder = new Map<string, number>();
+  for (const row of existingItemCounts ?? []) {
+    const category = row.category as string;
+    const order = num(row.display_order, 0) + 1;
+    nextItemOrder.set(category, Math.max(nextItemOrder.get(category) ?? 0, order));
+  }
+
+  const rows = inputItems.map((item) => {
+    const category = item.category.trim() || "Uncategorized";
+    const order = nextItemOrder.get(category) ?? 0;
+    nextItemOrder.set(category, order + 1);
+    return {
+      id: newId(),
+      restaurant_id: restaurantId,
+      dish: item.dish,
+      category,
+      price: item.price,
+      cost: 0,
+      description: item.description ?? null,
+      allergens: [],
+      dietary_tags: [],
+      spice_level: 0,
+      is_signature: false,
+      is_recommended: false,
+      is_available: true,
+      is_hidden: false,
+      display_order: order,
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  const { data: inserted, error } = await supabase.from("menu_items").insert(rows).select("*");
+  if (error) return { data: [], error: error.message };
+  return { data: (inserted ?? []).map(rowToMenuItem), error: null };
 }
