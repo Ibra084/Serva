@@ -56,6 +56,21 @@ export interface MenuItem {
   category: string;
   price: number;
   cost: number;
+  /** Present once the item has been created/edited through the Menu Builder; absent for upload-pipeline-only rows. */
+  id?: string;
+  description?: string;
+  imageUrl?: string;
+  allergens?: string[];
+  dietaryTags?: string[];
+  /** 0 (none) to 3 (very spicy). */
+  spiceLevel?: number;
+  isSignature?: boolean;
+  isRecommended?: boolean;
+  isAvailable?: boolean;
+  isHidden?: boolean;
+  availabilityWindow?: { start: string; end: string } | null;
+  prepTimeMinutes?: number;
+  displayOrder?: number;
 }
 
 export interface Review {
@@ -240,6 +255,11 @@ export type QRIntent =
   | "allergy"
   | "budget"
   | "pairing"
+  | "light_meal"
+  | "very_hungry"
+  | "dessert"
+  | "surprise_me"
+  | "full_meal"
   | "page_view"
   | "unknown";
 

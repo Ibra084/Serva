@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { loadRestaurantData, loadUploadBatches } from "@/lib/data-store";
+import { DEFAULT_MENU_APPEARANCE, type MenuAppearanceSettings, type MenuCategory } from "@/lib/menu-types";
 import type { MenuItem, Order, RestaurantData, UploadBatch } from "@/lib/types";
 
 export function useRestaurantData(restaurantSlug: string) {
@@ -45,23 +46,42 @@ export function useUploadBatches(restaurantSlug: string) {
 export function useQRMenu(restaurantSlug: string) {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [appearance, setAppearance] = useState<MenuAppearanceSettings>(DEFAULT_MENU_APPEARANCE);
+  const [totalItemCount, setTotalItemCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     fetch(`/api/qr/${restaurantSlug}/menu`)
-      .then((res) => (res.ok ? res.json() : { menu: [], orders: [] }))
-      .then((result: { menu: MenuItem[]; orders: Order[] }) => {
-        if (cancelled) return;
-        setMenu(result.menu ?? []);
-        setOrders(result.orders ?? []);
-        setLoading(false);
-      })
+      .then((res) =>
+        res.ok ? res.json() : { menu: [], orders: [], categories: [], appearance: DEFAULT_MENU_APPEARANCE, totalItemCount: 0 }
+      )
+      .then(
+        (result: {
+          menu: MenuItem[];
+          orders: Order[];
+          categories: MenuCategory[];
+          appearance: MenuAppearanceSettings;
+          totalItemCount: number;
+        }) => {
+          if (cancelled) return;
+          setMenu(result.menu ?? []);
+          setOrders(result.orders ?? []);
+          setCategories(result.categories ?? []);
+          setAppearance(result.appearance ?? DEFAULT_MENU_APPEARANCE);
+          setTotalItemCount(result.totalItemCount ?? 0);
+          setLoading(false);
+        }
+      )
       .catch(() => {
         if (cancelled) return;
         setMenu([]);
         setOrders([]);
+        setCategories([]);
+        setAppearance(DEFAULT_MENU_APPEARANCE);
+        setTotalItemCount(0);
         setLoading(false);
       });
     return () => {
@@ -71,5 +91,5 @@ export function useQRMenu(restaurantSlug: string) {
 
   const hasData = menu.length > 0;
 
-  return { menu, orders, loading, hasData };
+  return { menu, orders, categories, appearance, totalItemCount, loading, hasData };
 }

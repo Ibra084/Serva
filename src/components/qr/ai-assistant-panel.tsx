@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Bot, Plus, Send, Sparkles, User } from "lucide-react";
+import { Bot, Plus, Send, Sparkles, SlidersHorizontal, User } from "lucide-react";
 import type { MenuItem } from "@/lib/types";
 
 export interface ChatMessage {
@@ -31,6 +31,7 @@ export function AiAssistantPanel({
   onSend,
   onAddToBasket,
   sending = false,
+  onOpenPreferences,
 }: {
   messages: ChatMessage[];
   input: string;
@@ -38,6 +39,7 @@ export function AiAssistantPanel({
   onSend: (question: string) => void;
   onAddToBasket: (item: MenuItem, interactionId?: string) => void;
   sending?: boolean;
+  onOpenPreferences?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -51,10 +53,19 @@ export function AiAssistantPanel({
         <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
           <Sparkles className="size-4" />
         </span>
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">Menu Assistant</p>
           <p className="text-xs text-muted-foreground">Ask about spice, diet, budget, or pairings</p>
         </div>
+        {onOpenPreferences && (
+          <button
+            onClick={onOpenPreferences}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <SlidersHorizontal className="size-3.5" />
+            Preferences
+          </button>
+        )}
       </div>
 
       <div className="mt-4 flex flex-1 flex-col gap-3 overflow-y-auto">

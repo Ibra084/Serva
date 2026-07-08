@@ -48,6 +48,11 @@ const INTENT_LABEL: Record<QRIntent, string> = {
   allergy: "allergy-safe options",
   budget: "budget-friendly options",
   pairing: "pairing suggestions",
+  light_meal: "a light meal",
+  very_hungry: "a big appetite",
+  dessert: "dessert",
+  surprise_me: "a surprise pick",
+  full_meal: "a full meal",
   page_view: "page view",
   unknown: "something specific",
 };

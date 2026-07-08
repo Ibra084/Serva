@@ -1,16 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronLeft, ShoppingBag, UtensilsCrossed } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ShoppingBag, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
 import { WelcomeScreen, type WelcomeChoice } from "@/components/qr/welcome-screen";
 import { AiAssistantPanel, type ChatMessage } from "@/components/qr/ai-assistant-panel";
 import { MenuBrowser } from "@/components/qr/menu-browser";
+import { BookletCover } from "@/components/qr/booklet-cover";
+import { BookletMenu } from "@/components/qr/booklet-menu";
+import { GuestPreferencesSheet } from "@/components/qr/guest-preferences-sheet";
 import { BasketBar, BasketSheet } from "@/components/qr/basket-sheet";
 import { ReviewFlow, type ReviewInput } from "@/components/qr/review-flow";
 import { useQRMenu } from "@/lib/use-restaurant-data";
-import { detectCustomerIntent, recommendMenuItems } from "@/lib/qr-insights";
+import {
+  buildWaiterReply,
+  detectConsumerIntent,
+  getGuestPreferences,
+  recommendForGuest,
+  saveGuestPreferences,
+} from "@/lib/consumer-ai";
 import { markQRInteractionAccepted, saveQRInteraction, saveQROrder, saveQRReview } from "@/lib/qr-store";
 import { unslugify } from "@/lib/utils";
+import { DEFAULT_GUEST_PREFERENCES, type GuestPreferences } from "@/lib/menu-types";
 import type { MenuItem, QRBasketItem, QROrder } from "@/lib/types";
 
 type View = "welcome" | "assistant" | "menu" | "confirmation" | "review" | "thanks";
@@ -33,8 +43,9 @@ export function QRCustomerClient({
   restaurantId: string;
   tableId: string | null;
 }) {
-  const { menu, orders, loading, hasData } = useQRMenu(restaurantId);
+  const { menu, orders, appearance, totalItemCount, loading, hasData } = useQRMenu(restaurantId);
   const restaurantName = unslugify(restaurantId) || "Serva Restaurant";
+  const isBooklet = appearance.layout === "booklet";
 
   const [view, setView] = useState<View>("welcome");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -50,9 +61,15 @@ export function QRCustomerClient({
   const [basketOpen, setBasketOpen] = useState(false);
   const [specialRequests, setSpecialRequests] = useState("");
   const [lastOrder, setLastOrder] = useState<QROrder | null>(null);
+  const [preferences, setPreferences] = useState<GuestPreferences>(DEFAULT_GUEST_PREFERENCES);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
 
   const subtotal = basket.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = basket.reduce((sum, item) => sum + item.quantity, 0);
+
+  useEffect(() => {
+    setPreferences(getGuestPreferences(restaurantId));
+  }, [restaurantId]);
 
   useEffect(() => {
     saveQRInteraction(restaurantId, {
@@ -70,11 +87,16 @@ export function QRCustomerClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function savePreferences(prefs: GuestPreferences) {
+    setPreferences(prefs);
+    saveGuestPreferences(restaurantId, prefs);
+  }
+
   async function ask(question: string) {
     const trimmed = question.trim();
     if (!trimmed || asking) return;
-    const intent = detectCustomerIntent(trimmed);
-    const recommended = recommendMenuItems(menu, intent, trimmed, orders);
+    const intent = detectConsumerIntent(trimmed);
+    const recommended = recommendForGuest(menu, intent, trimmed, preferences, orders);
     const interactionId = newId();
 
     saveQRInteraction(restaurantId, {
@@ -93,14 +115,17 @@ export function QRCustomerClient({
     setView("assistant");
     setAsking(true);
 
-    let text = buildReplyText(intent, recommended);
+    let text = buildWaiterReply(intent, recommended, preferences);
     try {
-      const response = await fetch("/api/ai/assistant", {
+      const response = await fetch("/api/ai/consumer-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: trimmed,
-          data: { menu, orders, reviews: [], tables: [], importedAt: new Date().toISOString() },
+          menu,
+          orders,
+          guestPreferences: preferences,
+          restaurantName,
         }),
       });
       if (response.ok) {
@@ -211,7 +236,7 @@ export function QRCustomerClient({
     );
   }
 
-  if (!hasData) {
+  if (totalItemCount === 0) {
     return (
       <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
         <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">
@@ -221,6 +246,20 @@ export function QRCustomerClient({
         <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
           {restaurantName} hasn&rsquo;t uploaded a menu yet. If you&rsquo;re the owner, upload your menu data in the
           Serva portal to activate this QR experience.
+        </p>
+      </div>
+    );
+  }
+
+  if (!hasData) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">
+          <UtensilsCrossed className="size-6" />
+        </span>
+        <p className="font-serif text-lg font-medium tracking-tight text-foreground">Menu is not available yet</p>
+        <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+          {restaurantName}&rsquo;s menu is being updated. Please check with your server for today&rsquo;s offerings.
         </p>
       </div>
     );
@@ -259,11 +298,20 @@ export function QRCustomerClient({
         </div>
       )}
 
-      {view === "welcome" && (
-        <WelcomeScreen restaurantName={restaurantName} tableId={tableId} onChoose={handleWelcomeChoice} />
-      )}
+      {view === "welcome" &&
+        (isBooklet ? (
+          <BookletCover
+            restaurantName={restaurantName}
+            tableId={tableId}
+            appearance={appearance}
+            onViewMenu={() => setView("menu")}
+            onAskAi={() => setView("assistant")}
+          />
+        ) : (
+          <WelcomeScreen restaurantName={restaurantName} tableId={tableId} onChoose={handleWelcomeChoice} />
+        ))}
 
-      {view === "assistant" && (
+      {view === "assistant" && appearance.showAiBox && (
         <AiAssistantPanel
           messages={messages}
           input={chatInput}
@@ -271,12 +319,23 @@ export function QRCustomerClient({
           onSend={ask}
           onAddToBasket={addRecommendedToBasket}
           sending={asking}
+          onOpenPreferences={() => setPreferencesOpen(true)}
         />
       )}
 
-      {view === "menu" && (
-        <MenuBrowser menu={menu} basket={basket} onAdd={addToBasket} onChangeQuantity={changeQuantity} />
-      )}
+      {view === "menu" &&
+        (isBooklet ? (
+          <BookletMenu menu={menu} basket={basket} onAdd={addToBasket} onChangeQuantity={changeQuantity} appearance={appearance} />
+        ) : (
+          <MenuBrowser
+            menu={menu}
+            basket={basket}
+            onAdd={addToBasket}
+            onChangeQuantity={changeQuantity}
+            appearance={appearance}
+            dense={appearance.layout === "compact"}
+          />
+        ))}
 
       {view === "confirmation" && lastOrder && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -325,6 +384,16 @@ export function QRCustomerClient({
         <BasketBar itemCount={itemCount} subtotal={subtotal} onOpen={() => setBasketOpen(true)} />
       )}
 
+      {view === "welcome" && !showChrome && (
+        <button
+          onClick={() => setPreferencesOpen(true)}
+          className="fixed right-4 bottom-6 z-10 flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary"
+        >
+          <SlidersHorizontal className="size-3.5" />
+          Preferences
+        </button>
+      )}
+
       <BasketSheet
         open={basketOpen}
         onOpenChange={setBasketOpen}
@@ -335,39 +404,13 @@ export function QRCustomerClient({
         onChangeQuantity={changeQuantity}
         onSubmit={submitOrder}
       />
+
+      <GuestPreferencesSheet
+        open={preferencesOpen}
+        onOpenChange={setPreferencesOpen}
+        preferences={preferences}
+        onSave={savePreferences}
+      />
     </div>
   );
-}
-
-function buildReplyText(intent: ReturnType<typeof detectCustomerIntent>, items: MenuItem[]): string {
-  const names = items.map((item) => item.dish).join(" or ");
-
-  switch (intent) {
-    case "spicy":
-      return items.length
-        ? `Here's something with a kick: ${names}.`
-        : "Nothing's tagged spicy right now, but ask your server to turn up the heat on any dish.";
-    case "vegetarian":
-      return items.length
-        ? `Great vegetarian picks: ${names}.`
-        : "We don't have a dedicated vegetarian dish listed — ask your server for a customized option.";
-    case "popular":
-      return items.length ? `Guest favorites right now: ${names}.` : "We don't have enough order history yet to say what's popular.";
-    case "cheapest_main":
-      return items.length ? `Your best value main is ${names} at AED ${items[0].price}.` : "We couldn't find a main course to compare.";
-    case "high_protein":
-      return items.length ? `These pack the most protein: ${names}.` : "Ask your server about our high-protein options.";
-    case "signature":
-      return items.length ? `Our signature dish is ${names}.` : "Ask your server about tonight's chef special.";
-    case "allergy":
-      return items.length
-        ? `Based on the menu, these don't mention nuts: ${names}. Please double-check with your server, since we can't guarantee full allergen accuracy.`
-        : "Please check with your server directly for nut-free options.";
-    case "budget":
-      return items.length ? `Within that budget, I'd recommend: ${names}.` : "We couldn't find anything in that price range.";
-    case "pairing":
-      return items.length ? `A lot of guests pair that with ${names}.` : "That pairs well with almost anything on our menu.";
-    default:
-      return items.length ? `Here's what other guests are loving: ${names}.` : "Tell me more about what you're in the mood for.";
-  }
 }

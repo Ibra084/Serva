@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, Copy, Download, ExternalLink, QrCode, UtensilsCrossed } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Palette, QrCode, UtensilsCrossed } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { PortalEmptyState } from "@/components/portal/empty-state";
 import { Select } from "@/components/ui/select";
 import { useRestaurantData } from "@/lib/use-restaurant-data";
+import { loadMenuAppearance } from "@/lib/menu-appearance-store";
 
 const DEFAULT_TABLES = ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08"];
 
@@ -69,6 +70,11 @@ function CopyButton({ value }: { value: string }) {
 export function QrClient({ restaurantSlug }: { restaurantSlug: string }) {
   const { data, loading, hasData } = useRestaurantData(restaurantSlug);
   const svgRef = useRef<SVGSVGElement>(null);
+  const [isBooklet, setIsBooklet] = useState(false);
+
+  useEffect(() => {
+    loadMenuAppearance(restaurantSlug).then((appearance) => setIsBooklet(appearance.layout === "booklet"));
+  }, [restaurantSlug]);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const restaurantUrl = `${origin}/qr/${restaurantSlug}`;
@@ -107,13 +113,33 @@ export function QrClient({ restaurantSlug }: { restaurantSlug: string }) {
     <>
       <PortalTopbar restaurantSlug={restaurantSlug} />
       <main className="flex-1 overflow-y-auto bg-background px-6 py-8 sm:px-8">
-        <div className="flex items-center gap-2">
-          <QrCode className="size-5 text-primary" />
-          <h1 className="font-serif text-2xl font-medium tracking-tight text-foreground">QR Experience</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <QrCode className="size-5 text-primary" />
+              <h1 className="font-serif text-2xl font-medium tracking-tight text-foreground">QR Experience</h1>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Generate the QR menu your guests scan at the table — every interaction feeds your QR Insights.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/portal/${restaurantSlug}/menu-builder`}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              <UtensilsCrossed className="size-3.5" />
+              Menu Builder
+            </Link>
+            <Link
+              href={`/portal/${restaurantSlug}/qr/appearance`}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              <Palette className="size-3.5" />
+              Customize appearance
+            </Link>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Generate the QR menu your guests scan at the table — every interaction feeds your QR Insights.
-        </p>
 
         {!hasData || !data || data.menu.length === 0 ? (
           <PortalEmptyState
@@ -158,7 +184,7 @@ export function QrClient({ restaurantSlug }: { restaurantSlug: string }) {
                   className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
                 >
                   <ExternalLink className="size-3.5 shrink-0" />
-                  Preview experience
+                  {isBooklet ? "Preview Booklet Menu" : "Preview Customer Menu"}
                 </Link>
               </div>
             </div>

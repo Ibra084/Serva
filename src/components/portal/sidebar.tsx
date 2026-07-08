@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   LineChart,
   MapPin,
+  ChefHat,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Membership, RestaurantWorkspace } from "@/lib/types";
@@ -32,6 +33,7 @@ function navItems(restaurantSlug: string) {
     { label: "Opportunities", href: `${base}/opportunities`, icon: Target },
     { label: "Revenue Simulator", href: `${base}/simulator`, icon: SlidersHorizontal },
     { label: "Menu Intelligence", href: `${base}/menu`, icon: UtensilsCrossed },
+    { label: "Menu Builder", href: `${base}/menu-builder`, icon: ChefHat },
     { label: "Guest Insights", href: `${base}/guest-insights`, icon: Users },
     { label: "Reviews", href: `${base}/reviews`, icon: Star },
     { label: "AI Assistant", href: `${base}/assistant`, icon: MessageSquare },
