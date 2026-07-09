@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronLeft, ShoppingBag, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
+import { ChevronLeft, ShoppingBag, SlidersHorizontal, UtensilsCrossed } from "lucide-react";
 import { WelcomeScreen, type WelcomeChoice } from "@/components/qr/welcome-screen";
 import { AiAssistantPanel, type ChatMessage } from "@/components/qr/ai-assistant-panel";
 import { MenuBrowser } from "@/components/qr/menu-browser";
@@ -10,6 +10,7 @@ import { BookletMenu } from "@/components/qr/booklet-menu";
 import { GuestPreferencesSheet } from "@/components/qr/guest-preferences-sheet";
 import { BasketBar, BasketSheet } from "@/components/qr/basket-sheet";
 import { OrderStatusPanel } from "@/components/qr/order-status-panel";
+import { BillView } from "@/components/qr/bill-view";
 import { PaymentModal } from "@/components/qr/payment-modal";
 import { ReviewFlow, type ReviewInput } from "@/components/qr/review-flow";
 import { useQRMenu } from "@/lib/use-restaurant-data";
@@ -22,23 +23,29 @@ import {
   saveGuestPreferences,
 } from "@/lib/consumer-ai";
 import { syncGuestPreferences } from "@/lib/guest-preferences-store";
-import { markQRInteractionAccepted, saveQRInteraction, saveQROrder, saveQRReview, subscribeToSessionOrders, loadSessionOrders } from "@/lib/qr-store";
-import {
-  findActiveSessionForTable,
-  findTableByNumber,
-  getOrCreateActiveSession,
-  loadSessionById,
-  subscribeToSession,
-  updateSessionPaymentStatus,
-  updateSessionStatus,
-  updateSessionTotal,
-} from "@/lib/live-store";
+import { markQRInteractionAccepted, saveQRInteraction, saveQRReview, subscribeToSessionOrders } from "@/lib/qr-store";
+import { subscribeToSession, updateSessionPaymentStatus } from "@/lib/live-store";
 import { processDemoPayment, computeBill } from "@/lib/payment-store";
+import {
+  addCartItem,
+  cancelSubmittedOrder,
+  clearCart,
+  editSubmittedOrder,
+  getOrCreateActiveSession,
+  markPaid,
+  refreshSession,
+  requestBill as requestBillAction,
+  saveSession,
+  submitCartAsOrder,
+  subscribeToTableSession,
+  updateCartItem,
+  type TableSessionState,
+} from "@/lib/table-session-store";
 import { unslugify } from "@/lib/utils";
 import { DEFAULT_GUEST_PREFERENCES, type GuestPreferences } from "@/lib/menu-types";
-import type { LiveTableSession, MenuItem, QRBasketItem, QROrder, SplitType } from "@/lib/types";
+import type { MenuItem, QRBasketItem, SplitType } from "@/lib/types";
 
-type View = "welcome" | "assistant" | "menu" | "status" | "review" | "thanks";
+type View = "welcome" | "assistant" | "menu" | "status" | "bill" | "review" | "thanks";
 
 function newId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -71,60 +78,82 @@ export function QRCustomerClient({
   ]);
   const [chatInput, setChatInput] = useState("");
   const [asking, setAsking] = useState(false);
-  const [basket, setBasket] = useState<QRBasketItem[]>([]);
   const [basketOpen, setBasketOpen] = useState(false);
   const [specialRequests, setSpecialRequests] = useState("");
-  const [lastOrder, setLastOrder] = useState<QROrder | null>(null);
   const [preferences, setPreferences] = useState<GuestPreferences>(DEFAULT_GUEST_PREFERENCES);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [tableRowId, setTableRowId] = useState<string | null>(null);
-  const [session, setSession] = useState<LiveTableSession | null>(null);
-  const [sessionOrders, setSessionOrders] = useState<QROrder[]>([]);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paying, setPaying] = useState(false);
 
+  // Table-session-backed cart/order state, persisted to localStorage + Supabase and restored on reload.
+  const [tableSession, setTableSession] = useState<TableSessionState | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(Boolean(tableId));
+  const [initialViewApplied, setInitialViewApplied] = useState(false);
+
+  // Fallback, non-persistent cart for the rare case of no `table` query param (nothing to scope a session by).
+  const [fallbackBasket, setFallbackBasket] = useState<QRBasketItem[]>([]);
+
+  const basket = tableId ? (tableSession?.cartItems ?? []) : fallbackBasket;
   const subtotal = basket.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = basket.reduce((sum, item) => sum + item.quantity, 0);
+  const hasSubmittedOrders = Boolean(
+    tableSession?.submittedOrders.some((order) => order.status !== "cancelled")
+  );
 
   useEffect(() => {
     setPreferences(getGuestPreferences(restaurantId));
   }, [restaurantId]);
 
   useEffect(() => {
-    if (!tableId) return;
+    if (!tableId) {
+      setSessionLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const table = await findTableByNumber(restaurantId, tableId);
-      if (cancelled || !table) return;
-      setTableRowId(table.id);
-      const activeSession = await findActiveSessionForTable(restaurantId, table.id);
+      const state = await getOrCreateActiveSession(restaurantId, tableId);
       if (cancelled) return;
-      setSession(activeSession);
+      setTableSession(state);
+      setSessionLoading(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [restaurantId, tableId]);
 
-  async function refreshSessionOrders() {
-    if (!session) return;
-    setSessionOrders(await loadSessionOrders(restaurantId, session.id));
-  }
-
+  // Choose the customer's landing state once, on load/reload — never overrides a manual navigation afterward.
   useEffect(() => {
-    if (!session) return;
-    refreshSessionOrders();
-    const unsubscribeOrders = subscribeToSessionOrders(session.id, refreshSessionOrders);
-    const unsubscribeSession = subscribeToSession(session.id, async () => {
-      const fresh = await loadSessionById(session.id);
-      if (fresh) setSession({ ...fresh, restaurantId });
-    });
+    if (!tableId || sessionLoading || initialViewApplied || !tableSession) return;
+    setInitialViewApplied(true);
+    if (tableSession.paymentStatus === "paid" || hasSubmittedOrders) {
+      setView("status");
+    }
+  }, [tableId, sessionLoading, initialViewApplied, tableSession, hasSubmittedOrders]);
+
+  // Reflects staff-driven changes (marking preparing/served/paid, requesting bill) onto this device.
+  useEffect(() => {
+    if (!tableSession?.dbSessionId) return;
+    const dbSessionId = tableSession.dbSessionId;
+    const sessionId = tableSession.sessionId;
+    async function refresh() {
+      setTableSession(await refreshSession(sessionId));
+    }
+    const unsubscribeOrders = subscribeToSessionOrders(dbSessionId, refresh);
+    const unsubscribeSession = subscribeToSession(dbSessionId, refresh);
     return () => {
       unsubscribeOrders();
       unsubscribeSession();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id]);
+  }, [tableSession?.dbSessionId, tableSession?.sessionId]);
+
+  // Cross-tab local demo sync — a second tab/device open at the same table sees cart/order edits.
+  useEffect(() => {
+    if (!tableSession) return;
+    const sessionId = tableSession.sessionId;
+    return subscribeToTableSession(sessionId, async () => {
+      setTableSession(await refreshSession(sessionId));
+    });
+  }, [tableSession?.sessionId]);
 
   useEffect(() => {
     saveQRInteraction(restaurantId, {
@@ -203,14 +232,19 @@ export function QRCustomerClient({
   }
 
   function addToBasket(item: MenuItem, quantity = 1) {
-    setBasket((prev) => {
+    const basketItem: QRBasketItem = { dish: item.dish, category: item.category, price: item.price, quantity };
+    if (tableId && tableSession) {
+      setTableSession(addCartItem(tableSession.sessionId, basketItem));
+      return;
+    }
+    setFallbackBasket((prev) => {
       const existing = prev.find((entry) => entry.dish === item.dish);
       if (existing) {
         return prev.map((entry) =>
           entry.dish === item.dish ? { ...entry, quantity: entry.quantity + quantity } : entry
         );
       }
-      return [...prev, { dish: item.dish, category: item.category, price: item.price, quantity }];
+      return [...prev, basketItem];
     });
   }
 
@@ -221,10 +255,22 @@ export function QRCustomerClient({
   }
 
   function changeQuantity(dish: string, quantity: number) {
-    setBasket((prev) => {
+    if (tableId && tableSession) {
+      setTableSession(updateCartItem(tableSession.sessionId, dish, quantity));
+      return;
+    }
+    setFallbackBasket((prev) => {
       if (quantity <= 0) return prev.filter((entry) => entry.dish !== dish);
       return prev.map((entry) => (entry.dish === dish ? { ...entry, quantity } : entry));
     });
+  }
+
+  function clearBasket() {
+    if (tableId && tableSession) {
+      setTableSession(clearCart(tableSession.sessionId));
+      return;
+    }
+    setFallbackBasket([]);
   }
 
   async function submitOrder() {
@@ -232,46 +278,40 @@ export function QRCustomerClient({
     const recommendedDishSet = new Set(
       messages.flatMap((message) => message.recommendedItems?.map((item) => item.dish) ?? [])
     );
-    const aiRecommendedItems = basket
-      .map((item) => item.dish)
-      .filter((dish) => recommendedDishSet.has(dish));
+    const aiRecommendedItems = basket.map((item) => item.dish).filter((dish) => recommendedDishSet.has(dish));
 
-    let activeSession = session;
-    if (tableRowId && !activeSession) {
-      activeSession = await getOrCreateActiveSession(restaurantId, tableRowId);
-      if (activeSession) setSession(activeSession);
+    if (tableId && tableSession) {
+      const next = await submitCartAsOrder(tableSession.sessionId, {
+        specialRequests,
+        aiRecommendedItems,
+      });
+      setTableSession(next);
     }
 
-    const order: QROrder = {
-      orderId: newId(),
-      restaurantId,
-      tableId,
-      sessionId: activeSession?.id ?? null,
-      timestamp: new Date().toISOString(),
-      items: basket,
-      subtotal,
-      source: "qr",
-      aiRecommendedItems,
-      specialRequests: specialRequests.trim(),
-      status: "new",
-    };
-
-    const orderRowId = await saveQROrder(restaurantId, order);
-    if (activeSession) {
-      await updateSessionStatus(restaurantId, activeSession.id, "order_placed");
-      await updateSessionTotal(restaurantId, activeSession.id, activeSession.currentTotal + subtotal);
-    }
-    setLastOrder({ ...order, id: orderRowId ?? undefined });
-    setBasket([]);
     setSpecialRequests("");
     setBasketOpen(false);
     setView("status");
   }
 
+  function editOrderItem(orderId: string, dish: string, quantity: number) {
+    if (!tableSession) return;
+    const order = tableSession.submittedOrders.find((entry) => entry.orderId === orderId);
+    if (!order) return;
+    const updatedItems =
+      quantity <= 0
+        ? order.items.filter((entry) => entry.dish !== dish)
+        : order.items.map((entry) => (entry.dish === dish ? { ...entry, quantity } : entry));
+    void editSubmittedOrder(tableSession.sessionId, orderId, updatedItems).then(setTableSession);
+  }
+
+  function cancelOrder(orderId: string) {
+    if (!tableSession) return;
+    void cancelSubmittedOrder(tableSession.sessionId, orderId).then(setTableSession);
+  }
+
   async function requestBill() {
-    if (!session) return;
-    await updateSessionStatus(restaurantId, session.id, "ready_to_pay");
-    setSession({ ...session, status: "ready_to_pay" });
+    if (!tableSession) return;
+    setTableSession(await requestBillAction(tableSession.sessionId));
   }
 
   async function payBill(input: {
@@ -281,8 +321,11 @@ export function QRCustomerClient({
     tipPct?: number;
     tipAmount?: number;
   }) {
-    const activeItems = sessionOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
-    if (!session || activeItems.length === 0) return;
+    if (!tableSession) return;
+    const activeItems = tableSession.submittedOrders
+      .filter((order) => order.status !== "cancelled")
+      .flatMap((order) => order.items);
+    if (activeItems.length === 0) return;
     setPaying(true);
     const bill = computeBill({
       items: activeItems,
@@ -295,20 +338,19 @@ export function QRCustomerClient({
 
     const payment = await processDemoPayment({
       restaurantSlug: restaurantId,
-      tableId: tableRowId,
-      sessionId: session.id,
-      orderId: lastOrder?.id ?? null,
+      tableId: tableSession.tableRowId,
+      sessionId: tableSession.dbSessionId,
+      orderId: tableSession.submittedOrders[0]?.id ?? null,
       bill,
       splitType: input.splitType,
     });
 
     if (payment) {
       if (input.splitType === "full") {
-        await updateSessionStatus(restaurantId, session.id, "paid");
-        setSession({ ...session, status: "paid", paymentStatus: "paid" });
-      } else {
-        await updateSessionPaymentStatus(restaurantId, session.id, "partial");
-        setSession({ ...session, paymentStatus: "partial" });
+        setTableSession(await markPaid(tableSession.sessionId));
+      } else if (tableSession.dbSessionId) {
+        await updateSessionPaymentStatus(restaurantId, tableSession.dbSessionId, "partial");
+        setTableSession(saveSession({ ...tableSession, paymentStatus: "partial" }));
       }
     }
     setPaying(false);
@@ -320,7 +362,7 @@ export function QRCustomerClient({
       id: newId(),
       restaurantId,
       tableId,
-      orderId: lastOrder?.orderId ?? null,
+      orderId: tableSession?.submittedOrders[0]?.orderId ?? null,
       timestamp: new Date().toISOString(),
       foodRating: input.foodRating,
       serviceRating: input.serviceRating,
@@ -348,7 +390,7 @@ export function QRCustomerClient({
     ask(STARTER_QUESTION[choice]);
   }
 
-  if (loading) {
+  if (loading || sessionLoading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -386,6 +428,7 @@ export function QRCustomerClient({
   }
 
   const showChrome = view !== "welcome";
+  const showBasketBar = (view === "assistant" || view === "menu" || view === "welcome") && itemCount > 0;
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col bg-background">
@@ -431,7 +474,7 @@ export function QRCustomerClient({
           <WelcomeScreen
             restaurantName={restaurantName}
             tableId={tableId}
-            hasActiveSession={Boolean(session)}
+            hasActiveSession={hasSubmittedOrders}
             onChoose={handleWelcomeChoice}
           />
         ))}
@@ -462,15 +505,21 @@ export function QRCustomerClient({
           />
         ))}
 
-      {view === "status" && (
+      {view === "status" && tableSession && (
         <OrderStatusPanel
-          session={session}
-          orders={sessionOrders}
+          tableSession={tableSession}
           onAddMore={() => setView("menu")}
+          onViewBill={() => setView("bill")}
           onRequestBill={requestBill}
           onPayBill={() => setPaymentOpen(true)}
           onLeaveReview={() => setView("review")}
+          onEditOrderItem={editOrderItem}
+          onCancelOrder={cancelOrder}
         />
+      )}
+
+      {view === "bill" && tableSession && (
+        <BillView tableSession={tableSession} onBack={() => setView("status")} onPay={() => setPaymentOpen(true)} />
       )}
 
       {view === "review" && <ReviewFlow onSubmit={submitReview} />}
@@ -478,7 +527,7 @@ export function QRCustomerClient({
       {view === "thanks" && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
           <span className="flex size-16 items-center justify-center rounded-full bg-accent text-accent-foreground">
-            <CheckCircle2 className="size-7" />
+            <ShoppingBag className="size-7" />
           </span>
           <h2 className="font-serif text-xl font-medium tracking-tight text-foreground">Thank you!</h2>
           <p className="text-sm text-muted-foreground">Your feedback helps {restaurantName} improve.</p>
@@ -491,9 +540,7 @@ export function QRCustomerClient({
         </div>
       )}
 
-      {(view === "assistant" || view === "menu") && (
-        <BasketBar itemCount={itemCount} subtotal={subtotal} onOpen={() => setBasketOpen(true)} />
-      )}
+      {showBasketBar && <BasketBar itemCount={itemCount} subtotal={subtotal} onOpen={() => setBasketOpen(true)} />}
 
       {view === "welcome" && !showChrome && (
         <button
@@ -513,6 +560,7 @@ export function QRCustomerClient({
         specialRequests={specialRequests}
         onSpecialRequestsChange={setSpecialRequests}
         onChangeQuantity={changeQuantity}
+        onClearBasket={clearBasket}
         onSubmit={submitOrder}
       />
 
@@ -526,8 +574,8 @@ export function QRCustomerClient({
       <PaymentModal
         open={paymentOpen}
         onOpenChange={setPaymentOpen}
-        items={sessionOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items)}
-        guestCount={session?.guestCount ?? 1}
+        items={tableSession?.submittedOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items) ?? []}
+        guestCount={1}
         onPay={payBill}
         paying={paying}
       />

@@ -40,6 +40,7 @@ export function BasketSheet({
   specialRequests,
   onSpecialRequestsChange,
   onChangeQuantity,
+  onClearBasket,
   onSubmit,
 }: {
   open: boolean;
@@ -49,6 +50,7 @@ export function BasketSheet({
   specialRequests: string;
   onSpecialRequestsChange: (value: string) => void;
   onChangeQuantity: (dish: string, quantity: number) => void;
+  onClearBasket: () => void;
   onSubmit: () => void;
 }) {
   return (
@@ -58,6 +60,18 @@ export function BasketSheet({
           <p className="text-sm text-muted-foreground">Your basket is empty.</p>
         ) : (
           <div className="flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">
+                {basket.length} item{basket.length === 1 ? "" : "s"}
+              </p>
+              <button
+                onClick={onClearBasket}
+                className="flex items-center gap-1 text-xs font-medium text-destructive hover:underline"
+              >
+                <Trash2 className="size-3" />
+                Clear basket
+              </button>
+            </div>
             <div className="flex flex-col divide-y divide-border">
               {basket.map((item) => (
                 <div key={item.dish} className="flex items-center justify-between gap-3 py-3">

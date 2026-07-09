@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { newId, num } from "@/lib/db-utils";
-import type { QRInteraction, QROrder, QROrderStatus, QRReview } from "@/lib/types";
+import type { QRBasketItem, QRInteraction, QROrder, QROrderStatus, QRReview } from "@/lib/types";
 
 async function resolveRestaurantId(restaurantSlug: string): Promise<string | null> {
   const supabase = createClient();
@@ -185,6 +185,45 @@ export function subscribeToSessionOrders(sessionId: string, onChange: () => void
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+/**
+ * Replaces an order's line items and subtotal in place — used during the customer's short post-submit
+ * edit window. Anonymous-safe, per the same public-write trust model as the rest of the QR flow.
+ */
+export async function updateQROrderItems(
+  restaurantSlug: string,
+  orderRowId: string,
+  items: QRBasketItem[],
+  subtotal: number
+): Promise<boolean> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return false;
+
+  const supabase = createClient();
+  const { error: deleteError } = await supabase.from("qr_order_items").delete().eq("qr_order_id", orderRowId);
+  if (deleteError) return false;
+
+  if (items.length > 0) {
+    const { error: insertError } = await supabase.from("qr_order_items").insert(
+      items.map((item) => ({
+        qr_order_id: orderRowId,
+        dish: item.dish,
+        category: item.category,
+        price: item.price,
+        quantity: item.quantity,
+      }))
+    );
+    if (insertError) return false;
+  }
+
+  const { error: updateError } = await supabase
+    .from("qr_orders")
+    .update({ subtotal })
+    .eq("id", orderRowId)
+    .eq("restaurant_id", restaurantId);
+
+  return !updateError;
 }
 
 /** Owner-only status update (e.g. marking an order completed), restricted to restaurant members by RLS. */
