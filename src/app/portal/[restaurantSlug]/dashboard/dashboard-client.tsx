@@ -29,6 +29,7 @@ import { InsightCard } from "@/components/portal/insight-card";
 import { OpportunityFeedPreview } from "@/components/portal/opportunity-feed-preview";
 import { QrIntelligencePreview } from "@/components/portal/qr-intelligence-preview";
 import { RecentQrOrders } from "@/components/portal/recent-qr-orders";
+import { GuestExperienceSection } from "@/components/portal/guest-experience-section";
 import { useRestaurantData, useUploadBatches } from "@/lib/use-restaurant-data";
 import { useWorkspace } from "@/lib/use-workspace";
 import {
@@ -461,6 +462,7 @@ export function DashboardClient({ restaurantSlug }: { restaurantSlug: string }) 
           </div>
         )}
 
+        <GuestExperienceSection restaurantSlug={restaurantSlug} />
         <QrIntelligencePreview restaurantSlug={restaurantSlug} />
         <RecentQrOrders restaurantSlug={restaurantSlug} />
       </main>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ChevronsUpDown,
   LayoutDashboard,
+  LayoutGrid,
   Sparkles,
   UtensilsCrossed,
   Users,
@@ -27,6 +28,7 @@ export function navItems(restaurantSlug: string) {
   const base = `/portal/${restaurantSlug}`;
   return [
     { label: "Dashboard", href: `${base}/dashboard`, icon: LayoutDashboard },
+    { label: "Live Operations", href: `${base}/live`, icon: LayoutGrid },
     { label: "Upload Data", href: `${base}/upload`, icon: UploadCloud },
     { label: "Data Explorer", href: `${base}/data`, icon: Database },
     { label: "AI Daily Brief", href: `${base}/ai-brief`, icon: Sparkles },

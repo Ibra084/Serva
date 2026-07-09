@@ -281,12 +281,15 @@ export interface QRBasketItem {
   quantity: number;
 }
 
-export type QROrderStatus = "new" | "completed" | "cancelled";
+export type QROrderStatus = "new" | "preparing" | "served" | "ready_to_pay" | "paid" | "completed" | "cancelled";
 
 export interface QROrder {
+  /** Row id (uuid) — needed to link payments and to update status by primary key. */
+  id?: string;
   orderId: string;
   restaurantId: string;
   tableId: string | null;
+  sessionId?: string | null;
   timestamp: string;
   items: QRBasketItem[];
   subtotal: number;
@@ -324,4 +327,86 @@ export interface QRMetrics {
   mostAcceptedRecommendation: { dish: string; count: number } | null;
   itemsAddedAfterRecommendation: { dish: string; count: number }[];
   averageReviewScore: number | null;
+  topAllergyConcern: { label: string; count: number } | null;
+}
+
+// ============================================================================
+// Live operations: table registry, live floor state, payments
+// ============================================================================
+
+export interface RestaurantTable {
+  id: string;
+  restaurantId: string;
+  tableNumber: string;
+  seats: number;
+  zone: string | null;
+  displayOrder: number;
+}
+
+export type LiveTableStatus =
+  | "empty"
+  | "seated"
+  | "ordering"
+  | "order_placed"
+  | "preparing"
+  | "served"
+  | "ready_to_pay"
+  | "paid";
+
+export type LivePaymentStatus = "unpaid" | "partial" | "paid";
+
+export interface LiveTableSession {
+  id: string;
+  restaurantId: string;
+  tableId: string;
+  status: LiveTableStatus;
+  guestCount: number;
+  startedAt: string;
+  closedAt: string | null;
+  currentTotal: number;
+  paymentStatus: LivePaymentStatus;
+}
+
+export type SplitType = "full" | "equal" | "items";
+
+export interface Bill {
+  subtotal: number;
+  serviceCharge: number;
+  vat: number;
+  tip: number;
+  total: number;
+}
+
+export interface Payment {
+  id: string;
+  restaurantId: string;
+  tableId: string | null;
+  sessionId: string | null;
+  orderId: string | null;
+  amount: number;
+  tipAmount: number;
+  method: string;
+  status: "pending" | "paid" | "failed";
+  splitType: SplitType;
+  createdAt: string;
+}
+
+export interface AssistantAnswer {
+  answer: string;
+  evidence: string;
+  action: string;
+  impact: string;
+  confidence: number;
+}
+
+export interface GuestPreferencesRecord {
+  restaurantId: string;
+  anonymousGuestId: string;
+  dietaryPreference: string | null;
+  allergies: string[];
+  spicePreference: number | null;
+  budget: number | null;
+  mood: string | null;
+  hungerLevel: string | null;
+  updatedAt: string;
 }

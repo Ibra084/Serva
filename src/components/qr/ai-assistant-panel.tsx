@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Bot, Plus, Send, Sparkles, SlidersHorizontal, User } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Bot, Send, Sparkles, SlidersHorizontal, User } from "lucide-react";
+import { RecommendationCard } from "@/components/qr/recommendation-card";
 import type { MenuItem } from "@/lib/types";
 
 export interface ChatMessage {
@@ -9,19 +11,18 @@ export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   recommendedItems?: MenuItem[];
+  reasons?: Record<string, string>;
   interactionId?: string;
 }
 
 const SUGGESTED_QUESTIONS = [
+  "I want something popular",
+  "I'm vegetarian",
   "I want something spicy",
-  "I am vegetarian",
-  "What is popular?",
-  "What is the cheapest main?",
-  "What is high protein?",
-  "What is your signature dish?",
-  "I have a nut allergy",
-  "Recommend something under AED 100",
-  "What should I order with steak?",
+  "I'm under AED 100",
+  "I'm very hungry",
+  "What goes with steak?",
+  "Surprise me",
 ];
 
 export function AiAssistantPanel({
@@ -69,55 +70,53 @@ export function AiAssistantPanel({
       </div>
 
       <div className="mt-4 flex flex-1 flex-col gap-3 overflow-y-auto">
-        {messages.map((message) => (
-          <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
-            <div className="flex max-w-[86%] items-start gap-2">
-              {message.role === "assistant" && (
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                  <Bot className="size-3.5" />
-                </span>
-              )}
-              <div className="flex flex-col gap-2">
-                <p
-                  className={
-                    message.role === "user"
-                      ? "rounded-2xl rounded-tr-sm bg-primary px-3.5 py-2 text-sm text-primary-foreground"
-                      : "rounded-2xl rounded-tl-sm bg-secondary/70 px-3.5 py-2 text-sm text-foreground"
-                  }
-                >
-                  {message.text}
-                </p>
-                {message.recommendedItems && message.recommendedItems.length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    {message.recommendedItems.map((item) => (
-                      <div
-                        key={item.dish}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-foreground">{item.dish}</p>
-                          <p className="text-xs text-muted-foreground">AED {item.price}</p>
-                        </div>
-                        <button
-                          onClick={() => onAddToBasket(item, message.interactionId)}
-                          className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
-                        >
-                          <Plus className="size-3" />
-                          Add
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+        <AnimatePresence initial={false}>
+          {messages.map((message) => (
+            <motion.div
+              key={message.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
+            >
+              <div className="flex max-w-[86%] items-start gap-2">
+                {message.role === "assistant" && (
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                    <Bot className="size-3.5" />
+                  </span>
+                )}
+                <div className="flex flex-col gap-2">
+                  <p
+                    className={
+                      message.role === "user"
+                        ? "rounded-2xl rounded-tr-sm bg-primary px-3.5 py-2 text-sm text-primary-foreground"
+                        : "rounded-2xl rounded-tl-sm bg-secondary/70 px-3.5 py-2 text-sm text-foreground"
+                    }
+                  >
+                    {message.text}
+                  </p>
+                  {message.recommendedItems && message.recommendedItems.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      {message.recommendedItems.map((item) => (
+                        <RecommendationCard
+                          key={item.dish}
+                          item={item}
+                          reason={message.reasons?.[item.dish]}
+                          onAdd={() => onAddToBasket(item, message.interactionId)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {message.role === "user" && (
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    <User className="size-3.5" />
+                  </span>
                 )}
               </div>
-              {message.role === "user" && (
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                  <User className="size-3.5" />
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
+            </motion.div>
+          ))}
+        </AnimatePresence>
         {sending && (
           <div className="flex justify-start">
             <div className="flex items-center gap-2">

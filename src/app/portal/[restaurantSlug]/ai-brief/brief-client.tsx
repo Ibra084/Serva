@@ -125,9 +125,9 @@ export function BriefClient({ restaurantSlug }: { restaurantSlug: string }) {
               </div>
 
               <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground">Predicted monthly gain</p>
+                <p className="text-xs text-muted-foreground">Expected impact if you act today</p>
                 <p className="font-serif text-lg font-medium text-primary">
-                  +AED {brief.estimatedMonthlyGain.toLocaleString()}
+                  +AED {brief.estimatedMonthlyGain.toLocaleString()}/mo
                 </p>
               </div>
             </div>

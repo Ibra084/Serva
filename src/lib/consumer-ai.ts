@@ -255,6 +255,44 @@ export function buildWaiterReply(intent: QRIntent, items: MenuItem[], prefs: Gue
   }
 }
 
+/** One short, food-first reason per recommended item — powers the recommendation cards in the QR assistant. */
+export function buildItemReason(item: MenuItem, intent: QRIntent, prefs: GuestPreferences): string {
+  const budgetNote = prefs.budget != null && item.price <= prefs.budget ? ` and fits your AED ${prefs.budget} budget` : "";
+
+  switch (intent) {
+    case "spicy":
+      return `Brings the heat${budgetNote || " — a bold, spicy pick"}.`;
+    case "vegetarian":
+      return `Vegetarian-friendly${budgetNote}.`;
+    case "popular":
+      return `One of our most-ordered dishes${budgetNote}.`;
+    case "cheapest_main":
+      return `Our best value main at AED ${item.price}.`;
+    case "high_protein":
+      return `Hearty and protein-packed${budgetNote}.`;
+    case "signature":
+      return "Our signature dish — a house favorite.";
+    case "allergy":
+      return "Kept simple to help avoid common allergens — please confirm with your server.";
+    case "budget":
+      return `Great pick within your budget${budgetNote}.`;
+    case "pairing":
+      return "Pairs beautifully with that.";
+    case "light_meal":
+      return "Lighter option, easy on the appetite.";
+    case "very_hungry":
+      return "A generous portion to really fill you up.";
+    case "dessert":
+      return "A guest favorite way to finish the meal.";
+    case "surprise_me":
+      return "Trust us on this one — it's a favorite.";
+    case "full_meal":
+      return "Rounds out a complete meal.";
+    default:
+      return item.isSignature ? "One of our signature dishes." : `Popular, and rich in flavor${budgetNote}.`;
+  }
+}
+
 /** Strips cost entirely and drops fields the guest never needs, before this is sent to the LLM. */
 export function buildConsumerMenuContext(menu: MenuItem[]) {
   return menu.map((item) => ({

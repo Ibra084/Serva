@@ -1,5 +1,14 @@
 import { dishRevenue, round } from "@/lib/insights";
-import type { MenuItem, Order, QRInteraction, QRIntent, QRMetrics, QROrder, QRReview } from "@/lib/types";
+import type {
+  GuestPreferencesRecord,
+  MenuItem,
+  Order,
+  QRInteraction,
+  QRIntent,
+  QRMetrics,
+  QROrder,
+  QRReview,
+} from "@/lib/types";
 
 const SPICY_KEYWORDS = [
   "spicy",
@@ -176,6 +185,73 @@ export function summarizeQRQuestions(interactions: QRInteraction[]): { question:
     .slice(0, 8);
 }
 
+/** Most common phrasing among "allergy" intent questions — powers the dashboard's "Most common allergy concern" card. */
+export function topAllergyConcern(interactions: QRInteraction[]): { label: string; count: number } | null {
+  const counts = new Map<string, number>();
+  for (const interaction of interactions) {
+    if (interaction.intent !== "allergy" || !interaction.question.trim()) continue;
+    const key = interaction.question.trim();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0];
+  return top ? { label: top[0], count: top[1] } : null;
+}
+
+/** Scans vs. orders per table — how often a QR scan at a table turns into an order. */
+export function calculateTableConversion(
+  interactions: QRInteraction[],
+  orders: QROrder[]
+): { tableId: string; scans: number; orders: number; conversionRate: number }[] {
+  const scansByTable = new Map<string, number>();
+  for (const interaction of interactions) {
+    if (interaction.intent !== "page_view" || !interaction.tableId) continue;
+    scansByTable.set(interaction.tableId, (scansByTable.get(interaction.tableId) ?? 0) + 1);
+  }
+  const ordersByTable = new Map<string, number>();
+  for (const order of orders) {
+    if (order.status === "cancelled" || !order.tableId) continue;
+    ordersByTable.set(order.tableId, (ordersByTable.get(order.tableId) ?? 0) + 1);
+  }
+  return Array.from(scansByTable.entries())
+    .map(([tableId, scans]) => {
+      const orderCount = ordersByTable.get(tableId) ?? 0;
+      return { tableId, scans, orders: orderCount, conversionRate: scans > 0 ? round((orderCount / scans) * 100, 0) : 0 };
+    })
+    .sort((a, b) => b.conversionRate - a.conversionRate);
+}
+
+/** Ranked summaries of stored guest preferences, for the "guest preference trends" section of QR Insights. */
+export function summarizeGuestPreferenceTrends(preferences: GuestPreferencesRecord[]): {
+  topDietary: { label: string; count: number } | null;
+  topMood: { label: string; count: number } | null;
+  topAllergy: { label: string; count: number } | null;
+  averageBudget: number | null;
+} {
+  const dietaryCounts = new Map<string, number>();
+  const moodCounts = new Map<string, number>();
+  const allergyCounts = new Map<string, number>();
+  const budgets: number[] = [];
+
+  for (const pref of preferences) {
+    if (pref.dietaryPreference) dietaryCounts.set(pref.dietaryPreference, (dietaryCounts.get(pref.dietaryPreference) ?? 0) + 1);
+    if (pref.mood) moodCounts.set(pref.mood, (moodCounts.get(pref.mood) ?? 0) + 1);
+    for (const allergy of pref.allergies) allergyCounts.set(allergy, (allergyCounts.get(allergy) ?? 0) + 1);
+    if (pref.budget != null) budgets.push(pref.budget);
+  }
+
+  const top = (map: Map<string, number>) => {
+    const entry = Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0];
+    return entry ? { label: entry[0], count: entry[1] } : null;
+  };
+
+  return {
+    topDietary: top(dietaryCounts),
+    topMood: top(moodCounts),
+    topAllergy: top(allergyCounts),
+    averageBudget: budgets.length > 0 ? round(budgets.reduce((sum, value) => sum + value, 0) / budgets.length, 0) : null,
+  };
+}
+
 export function calculateQRMetrics(
   interactions: QRInteraction[],
   orders: QROrder[],
@@ -264,6 +340,7 @@ export function calculateQRMetrics(
     mostAcceptedRecommendation,
     itemsAddedAfterRecommendation,
     averageReviewScore,
+    topAllergyConcern: topAllergyConcern(interactions),
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BadgePercent,
   ListChecks,
@@ -9,11 +9,14 @@ import {
   ReceiptText,
   Sparkles,
   Star,
+  TableProperties,
   Wallet,
 } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { useQRData } from "@/lib/use-qr-data";
-import { calculateQRMetrics, generateQRInsights } from "@/lib/qr-insights";
+import { calculateQRMetrics, calculateTableConversion, generateQRInsights, summarizeGuestPreferenceTrends } from "@/lib/qr-insights";
+import { loadGuestPreferences } from "@/lib/guest-preferences-store";
+import type { GuestPreferencesRecord } from "@/lib/types";
 
 function StatTile({ label, value, icon: Icon }: { label: string; value: string; icon: React.ElementType }) {
   return (
@@ -67,9 +70,22 @@ function RankedList({
 
 export function QrInsightsClient({ restaurantSlug }: { restaurantSlug: string }) {
   const { interactions, orders, reviews, loading } = useQRData(restaurantSlug);
+  const [guestPreferences, setGuestPreferences] = useState<GuestPreferencesRecord[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGuestPreferences(restaurantSlug).then((prefs) => {
+      if (!cancelled) setGuestPreferences(prefs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantSlug]);
 
   const metrics = useMemo(() => calculateQRMetrics(interactions, orders, reviews), [interactions, orders, reviews]);
   const insights = useMemo(() => generateQRInsights(interactions, orders, reviews), [interactions, orders, reviews]);
+  const tableConversion = useMemo(() => calculateTableConversion(interactions, orders), [interactions, orders]);
+  const preferenceTrends = useMemo(() => summarizeGuestPreferenceTrends(guestPreferences), [guestPreferences]);
 
   const latestOrders = useMemo(
     () => [...orders].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).slice(0, 8),
@@ -242,6 +258,59 @@ export function QrInsightsClient({ restaurantSlug }: { restaurantSlug: string })
                 </div>
               )}
             </>
+          )}
+        </div>
+
+        <div className="mt-8">
+          <h2 className="text-sm font-medium text-foreground">Table Conversion</h2>
+          <p className="mt-1 text-xs text-muted-foreground">How often a QR scan at a table turns into an order</p>
+          {tableConversion.length === 0 ? (
+            <div className="mt-3">
+              <EmptySection message="No table scans yet" />
+            </div>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-2xl border border-border bg-card">
+              <table className="w-full min-w-[480px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="px-5 py-3 font-medium">Table</th>
+                    <th className="px-5 py-3 font-medium">Scans</th>
+                    <th className="px-5 py-3 font-medium">Orders</th>
+                    <th className="px-5 py-3 font-medium">Conversion</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {tableConversion.slice(0, 10).map((row) => (
+                    <tr key={row.tableId}>
+                      <td className="px-5 py-3 font-medium text-foreground">{row.tableId}</td>
+                      <td className="px-5 py-3 text-muted-foreground">{row.scans}</td>
+                      <td className="px-5 py-3 text-muted-foreground">{row.orders}</td>
+                      <td className="px-5 py-3 text-foreground">{row.conversionRate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8">
+          <h2 className="text-sm font-medium text-foreground">Guest Preference Trends</h2>
+          {guestPreferences.length === 0 ? (
+            <div className="mt-3">
+              <EmptySection message="No saved guest preferences yet" />
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatTile label="Top dietary preference" value={preferenceTrends.topDietary?.label ?? "—"} icon={TableProperties} />
+              <StatTile label="Top mood" value={preferenceTrends.topMood?.label ?? "—"} icon={Sparkles} />
+              <StatTile label="Top allergy noted" value={preferenceTrends.topAllergy?.label ?? "—"} icon={ListChecks} />
+              <StatTile
+                label="Average stated budget"
+                value={preferenceTrends.averageBudget !== null ? `AED ${preferenceTrends.averageBudget}` : "—"}
+                icon={Wallet}
+              />
+            </div>
           )}
         </div>
 

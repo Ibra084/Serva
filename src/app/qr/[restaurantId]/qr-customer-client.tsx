@@ -9,21 +9,36 @@ import { BookletCover } from "@/components/qr/booklet-cover";
 import { BookletMenu } from "@/components/qr/booklet-menu";
 import { GuestPreferencesSheet } from "@/components/qr/guest-preferences-sheet";
 import { BasketBar, BasketSheet } from "@/components/qr/basket-sheet";
+import { OrderStatusPanel } from "@/components/qr/order-status-panel";
+import { PaymentModal } from "@/components/qr/payment-modal";
 import { ReviewFlow, type ReviewInput } from "@/components/qr/review-flow";
 import { useQRMenu } from "@/lib/use-restaurant-data";
 import {
+  buildItemReason,
   buildWaiterReply,
   detectConsumerIntent,
   getGuestPreferences,
   recommendForGuest,
   saveGuestPreferences,
 } from "@/lib/consumer-ai";
-import { markQRInteractionAccepted, saveQRInteraction, saveQROrder, saveQRReview } from "@/lib/qr-store";
+import { syncGuestPreferences } from "@/lib/guest-preferences-store";
+import { markQRInteractionAccepted, saveQRInteraction, saveQROrder, saveQRReview, subscribeToSessionOrders, loadSessionOrders } from "@/lib/qr-store";
+import {
+  findActiveSessionForTable,
+  findTableByNumber,
+  getOrCreateActiveSession,
+  loadSessionById,
+  subscribeToSession,
+  updateSessionPaymentStatus,
+  updateSessionStatus,
+  updateSessionTotal,
+} from "@/lib/live-store";
+import { processDemoPayment, computeBill } from "@/lib/payment-store";
 import { unslugify } from "@/lib/utils";
 import { DEFAULT_GUEST_PREFERENCES, type GuestPreferences } from "@/lib/menu-types";
-import type { MenuItem, QRBasketItem, QROrder } from "@/lib/types";
+import type { LiveTableSession, MenuItem, QRBasketItem, QROrder, SplitType } from "@/lib/types";
 
-type View = "welcome" | "assistant" | "menu" | "confirmation" | "review" | "thanks";
+type View = "welcome" | "assistant" | "menu" | "status" | "review" | "thanks";
 
 function newId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -31,8 +46,7 @@ function newId() {
     : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-const STARTER_QUESTION: Record<"recommend" | "allergies", string> = {
-  recommend: "What is popular?",
+const STARTER_QUESTION: Record<"allergies", string> = {
   allergies: "I have a nut allergy",
 };
 
@@ -63,6 +77,11 @@ export function QRCustomerClient({
   const [lastOrder, setLastOrder] = useState<QROrder | null>(null);
   const [preferences, setPreferences] = useState<GuestPreferences>(DEFAULT_GUEST_PREFERENCES);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [tableRowId, setTableRowId] = useState<string | null>(null);
+  const [session, setSession] = useState<LiveTableSession | null>(null);
+  const [sessionOrders, setSessionOrders] = useState<QROrder[]>([]);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paying, setPaying] = useState(false);
 
   const subtotal = basket.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = basket.reduce((sum, item) => sum + item.quantity, 0);
@@ -70,6 +89,42 @@ export function QRCustomerClient({
   useEffect(() => {
     setPreferences(getGuestPreferences(restaurantId));
   }, [restaurantId]);
+
+  useEffect(() => {
+    if (!tableId) return;
+    let cancelled = false;
+    (async () => {
+      const table = await findTableByNumber(restaurantId, tableId);
+      if (cancelled || !table) return;
+      setTableRowId(table.id);
+      const activeSession = await findActiveSessionForTable(restaurantId, table.id);
+      if (cancelled) return;
+      setSession(activeSession);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId, tableId]);
+
+  async function refreshSessionOrders() {
+    if (!session) return;
+    setSessionOrders(await loadSessionOrders(restaurantId, session.id));
+  }
+
+  useEffect(() => {
+    if (!session) return;
+    refreshSessionOrders();
+    const unsubscribeOrders = subscribeToSessionOrders(session.id, refreshSessionOrders);
+    const unsubscribeSession = subscribeToSession(session.id, async () => {
+      const fresh = await loadSessionById(session.id);
+      if (fresh) setSession({ ...fresh, restaurantId });
+    });
+    return () => {
+      unsubscribeOrders();
+      unsubscribeSession();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
 
   useEffect(() => {
     saveQRInteraction(restaurantId, {
@@ -90,6 +145,7 @@ export function QRCustomerClient({
   function savePreferences(prefs: GuestPreferences) {
     setPreferences(prefs);
     saveGuestPreferences(restaurantId, prefs);
+    syncGuestPreferences(restaurantId, prefs);
   }
 
   async function ask(question: string) {
@@ -138,9 +194,11 @@ export function QRCustomerClient({
       setAsking(false);
     }
 
+    const reasons = Object.fromEntries(recommended.map((item) => [item.dish, buildItemReason(item, intent, preferences)]));
+
     setMessages((prev) => [
       ...prev,
-      { id: newId(), role: "assistant", text, recommendedItems: recommended, interactionId },
+      { id: newId(), role: "assistant", text, recommendedItems: recommended, reasons, interactionId },
     ]);
   }
 
@@ -178,10 +236,17 @@ export function QRCustomerClient({
       .map((item) => item.dish)
       .filter((dish) => recommendedDishSet.has(dish));
 
+    let activeSession = session;
+    if (tableRowId && !activeSession) {
+      activeSession = await getOrCreateActiveSession(restaurantId, tableRowId);
+      if (activeSession) setSession(activeSession);
+    }
+
     const order: QROrder = {
       orderId: newId(),
       restaurantId,
       tableId,
+      sessionId: activeSession?.id ?? null,
       timestamp: new Date().toISOString(),
       items: basket,
       subtotal,
@@ -191,12 +256,63 @@ export function QRCustomerClient({
       status: "new",
     };
 
-    await saveQROrder(restaurantId, order);
-    setLastOrder(order);
+    const orderRowId = await saveQROrder(restaurantId, order);
+    if (activeSession) {
+      await updateSessionStatus(restaurantId, activeSession.id, "order_placed");
+      await updateSessionTotal(restaurantId, activeSession.id, activeSession.currentTotal + subtotal);
+    }
+    setLastOrder({ ...order, id: orderRowId ?? undefined });
     setBasket([]);
     setSpecialRequests("");
     setBasketOpen(false);
-    setView("confirmation");
+    setView("status");
+  }
+
+  async function requestBill() {
+    if (!session) return;
+    await updateSessionStatus(restaurantId, session.id, "ready_to_pay");
+    setSession({ ...session, status: "ready_to_pay" });
+  }
+
+  async function payBill(input: {
+    splitType: SplitType;
+    splitCount?: number;
+    selectedItemIndexes?: number[];
+    tipPct?: number;
+    tipAmount?: number;
+  }) {
+    const activeItems = sessionOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
+    if (!session || activeItems.length === 0) return;
+    setPaying(true);
+    const bill = computeBill({
+      items: activeItems,
+      splitType: input.splitType,
+      splitCount: input.splitCount,
+      selectedItemIndexes: input.selectedItemIndexes,
+      tipPct: input.tipPct,
+      tipAmount: input.tipAmount,
+    });
+
+    const payment = await processDemoPayment({
+      restaurantSlug: restaurantId,
+      tableId: tableRowId,
+      sessionId: session.id,
+      orderId: lastOrder?.id ?? null,
+      bill,
+      splitType: input.splitType,
+    });
+
+    if (payment) {
+      if (input.splitType === "full") {
+        await updateSessionStatus(restaurantId, session.id, "paid");
+        setSession({ ...session, status: "paid", paymentStatus: "paid" });
+      } else {
+        await updateSessionPaymentStatus(restaurantId, session.id, "partial");
+        setSession({ ...session, paymentStatus: "partial" });
+      }
+    }
+    setPaying(false);
+    setPaymentOpen(false);
   }
 
   async function submitReview(input: ReviewInput) {
@@ -221,8 +337,12 @@ export function QRCustomerClient({
       setView("menu");
       return;
     }
-    if (choice === "specific") {
+    if (choice === "choose") {
       setView("assistant");
+      return;
+    }
+    if (choice === "bill") {
+      setView("status");
       return;
     }
     ask(STARTER_QUESTION[choice]);
@@ -308,7 +428,12 @@ export function QRCustomerClient({
             onAskAi={() => setView("assistant")}
           />
         ) : (
-          <WelcomeScreen restaurantName={restaurantName} tableId={tableId} onChoose={handleWelcomeChoice} />
+          <WelcomeScreen
+            restaurantName={restaurantName}
+            tableId={tableId}
+            hasActiveSession={Boolean(session)}
+            onChoose={handleWelcomeChoice}
+          />
         ))}
 
       {view === "assistant" && appearance.showAiBox && (
@@ -337,29 +462,15 @@ export function QRCustomerClient({
           />
         ))}
 
-      {view === "confirmation" && lastOrder && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <span className="flex size-16 items-center justify-center rounded-full bg-accent text-accent-foreground">
-            <CheckCircle2 className="size-7" />
-          </span>
-          <h2 className="font-serif text-xl font-medium tracking-tight text-foreground">Order received.</h2>
-          <p className="text-sm text-muted-foreground">
-            {lastOrder.items.length} item{lastOrder.items.length === 1 ? "" : "s"} · AED{" "}
-            {lastOrder.subtotal.toLocaleString()}
-          </p>
-          <button
-            onClick={() => setView("review")}
-            className="mt-3 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
-          >
-            Leave a review
-          </button>
-          <button
-            onClick={() => setView("welcome")}
-            className="text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            Order again
-          </button>
-        </div>
+      {view === "status" && (
+        <OrderStatusPanel
+          session={session}
+          orders={sessionOrders}
+          onAddMore={() => setView("menu")}
+          onRequestBill={requestBill}
+          onPayBill={() => setPaymentOpen(true)}
+          onLeaveReview={() => setView("review")}
+        />
       )}
 
       {view === "review" && <ReviewFlow onSubmit={submitReview} />}
@@ -410,6 +521,15 @@ export function QRCustomerClient({
         onOpenChange={setPreferencesOpen}
         preferences={preferences}
         onSave={savePreferences}
+      />
+
+      <PaymentModal
+        open={paymentOpen}
+        onOpenChange={setPaymentOpen}
+        items={sessionOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items)}
+        guestCount={session?.guestCount ?? 1}
+        onPay={payBill}
+        paying={paying}
       />
     </div>
   );

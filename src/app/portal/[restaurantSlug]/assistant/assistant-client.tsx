@@ -1,27 +1,104 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Send, Sparkles, User } from "lucide-react";
+import {
+  Bot,
+  ClipboardList,
+  Gauge,
+  Lightbulb,
+  Send,
+  Sparkles,
+  Target,
+  TrendingUp,
+  User,
+} from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { useRestaurantData } from "@/lib/use-restaurant-data";
-import { answerBusinessQuestion } from "@/lib/insights";
+import { setOpportunityStatus } from "@/lib/opportunity-store";
+import type { AssistantAnswer } from "@/lib/types";
 
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+  answer?: AssistantAnswer;
 }
 
-const SUGGESTED_QUESTIONS = [
-  "Why was revenue up or down?",
-  "Which dish should I remove?",
-  "How do I increase dessert sales?",
-  "What is my busiest time?",
-  "What should I do today?",
-  "Which item should I promote?",
+const PROMPT_CARDS = [
+  { label: "Why did revenue change?", icon: TrendingUp },
+  { label: "What should I do before dinner service?", icon: ClipboardList },
+  { label: "Which dish should I promote today?", icon: Sparkles },
+  { label: "How do I increase average bill?", icon: Gauge },
+  { label: "Which tables are underperforming?", icon: Target },
+  { label: "What are customers complaining about?", icon: Lightbulb },
 ];
 
 const NO_DATA_MESSAGE =
   "I can answer questions about revenue, menu performance, guests, reviews, and opportunities once your restaurant data is uploaded.";
+
+function AnswerCards({
+  answer,
+  onCreateOpportunity,
+  created,
+}: {
+  answer: AssistantAnswer;
+  onCreateOpportunity: () => void;
+  created: boolean;
+}) {
+  const [showEvidence, setShowEvidence] = useState(false);
+
+  return (
+    <div className="flex w-full max-w-[90%] flex-col gap-2.5">
+      <div className="rounded-2xl rounded-tl-sm border border-primary/15 bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm leading-relaxed text-foreground">{answer.answer}</p>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
+            <Gauge className="size-3" />
+            {answer.confidence}%
+          </span>
+        </div>
+      </div>
+
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        <div className="rounded-xl bg-secondary/60 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <ClipboardList className="size-3.5" />
+            Suggested action
+          </div>
+          <p className="mt-1 text-sm text-foreground">{answer.action}</p>
+        </div>
+        <div className="rounded-xl bg-secondary/60 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <TrendingUp className="size-3.5" />
+            Expected impact
+          </div>
+          <p className="mt-1 text-sm text-foreground">{answer.impact}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setShowEvidence((v) => !v)}
+          className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+        >
+          {showEvidence ? "Hide source data" : "Source data"}
+        </button>
+        <button
+          onClick={onCreateOpportunity}
+          disabled={created}
+          className="rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
+        >
+          {created ? "Added to opportunities" : "Create opportunity"}
+        </button>
+      </div>
+
+      {showEvidence && (
+        <div className="rounded-xl border border-dashed border-border p-3.5 text-xs leading-relaxed text-muted-foreground">
+          {answer.evidence}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AssistantClient({ restaurantSlug }: { restaurantSlug: string }) {
   const { data } = useRestaurantData(restaurantSlug);
@@ -33,6 +110,7 @@ export function AssistantClient({ restaurantSlug }: { restaurantSlug: string }) 
   ]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [createdOpportunities, setCreatedOpportunities] = useState<Set<number>>(new Set());
 
   async function ask(question: string) {
     const trimmed = question.trim();
@@ -53,17 +131,22 @@ export function AssistantClient({ restaurantSlug }: { restaurantSlug: string }) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmed, data }),
       });
-      const json = await res.json();
-      const answer = json.answer || answerBusinessQuestion(trimmed, data);
-      setMessages((prev) => [...prev, { role: "assistant", text: answer }]);
+      const answer = (await res.json()) as AssistantAnswer;
+      setMessages((prev) => [...prev, { role: "assistant", text: answer.answer, answer }]);
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: answerBusinessQuestion(trimmed, data) },
+        { role: "assistant", text: "Something went wrong answering that — try again in a moment." },
       ]);
     } finally {
       setThinking(false);
     }
+  }
+
+  async function createOpportunity(messageIndex: number, answer: AssistantAnswer) {
+    await setOpportunityStatus(restaurantSlug, `assistant-${messageIndex}-${Date.now()}`, "saved");
+    setCreatedOpportunities((prev) => new Set(prev).add(messageIndex));
+    void answer;
   }
 
   return (
@@ -71,22 +154,21 @@ export function AssistantClient({ restaurantSlug }: { restaurantSlug: string }) 
       <PortalTopbar restaurantSlug={restaurantSlug} />
       <main className="flex-1 overflow-y-auto bg-background px-6 py-8 sm:px-8">
         <div className="mx-auto flex h-full max-w-2xl flex-col">
-          <h1 className="font-serif text-2xl font-medium tracking-tight text-foreground">
-            AI Assistant
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            AI-powered answers grounded in your uploaded restaurant data.
-          </p>
+          <h1 className="font-serif text-2xl font-medium tracking-tight text-foreground">AI Assistant</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Your restaurant command center — ask, and act.</p>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {SUGGESTED_QUESTIONS.map((question) => (
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            {PROMPT_CARDS.map((prompt) => (
               <button
-                key={question}
-                onClick={() => ask(question)}
+                key={prompt.label}
+                onClick={() => ask(prompt.label)}
                 disabled={thinking}
-                className="rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3.5 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {question}
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                  <prompt.icon className="size-3.5" />
+                </span>
+                {prompt.label}
               </button>
             ))}
           </div>
@@ -94,33 +176,30 @@ export function AssistantClient({ restaurantSlug }: { restaurantSlug: string }) 
           <div className="mt-5 flex flex-1 flex-col gap-4 rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-1 flex-col gap-4 overflow-y-auto">
               {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={
-                    message.role === "user" ? "flex justify-end" : "flex justify-start"
-                  }
-                >
-                  <div
-                    className={
-                      message.role === "user"
-                        ? "flex max-w-[80%] items-start gap-2"
-                        : "flex max-w-[80%] items-start gap-2"
-                    }
-                  >
+                <div key={index} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                  <div className="flex w-full items-start gap-2">
                     {message.role === "assistant" && (
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
                         <Bot className="size-4" />
                       </span>
                     )}
-                    <p
-                      className={
-                        message.role === "user"
-                          ? "rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground"
-                          : "rounded-2xl rounded-tl-sm bg-secondary/70 px-4 py-2.5 text-sm text-foreground"
-                      }
-                    >
-                      {message.text}
-                    </p>
+                    {message.answer ? (
+                      <AnswerCards
+                        answer={message.answer}
+                        onCreateOpportunity={() => createOpportunity(index, message.answer!)}
+                        created={createdOpportunities.has(index)}
+                      />
+                    ) : (
+                      <p
+                        className={
+                          message.role === "user"
+                            ? "ml-auto rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground"
+                            : "rounded-2xl rounded-tl-sm bg-secondary/70 px-4 py-2.5 text-sm text-foreground"
+                        }
+                      >
+                        {message.text}
+                      </p>
+                    )}
                     {message.role === "user" && (
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
                         <User className="size-4" />
