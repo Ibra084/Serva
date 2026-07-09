@@ -351,7 +351,9 @@ export type LiveTableStatus =
   | "preparing"
   | "served"
   | "ready_to_pay"
-  | "paid";
+  | "paid"
+  /** Terminal — the only status that means "archived, no longer part of the active live view". Set exclusively by `closeSession`; "paid" alone must never imply closed. */
+  | "closed";
 
 export type LivePaymentStatus = "unpaid" | "partial" | "paid";
 

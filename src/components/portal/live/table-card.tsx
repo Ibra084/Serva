@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChefHat, CreditCard, Users, Utensils, X } from "lucide-react";
+import { CheckCircle2, ChefHat, CreditCard, DoorClosed, Users, Utensils, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LiveTableSession, LiveTableStatus, QROrder, RestaurantTable } from "@/lib/types";
 
@@ -14,6 +14,7 @@ const STATUS_LABEL: Record<LiveTableStatus, string> = {
   served: "Served",
   ready_to_pay: "Ready to pay",
   paid: "Paid",
+  closed: "Closed",
 };
 
 const STATUS_STYLE: Record<LiveTableStatus, string> = {
@@ -25,6 +26,7 @@ const STATUS_STYLE: Record<LiveTableStatus, string> = {
   served: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
   ready_to_pay: "bg-primary/15 text-primary",
   paid: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  closed: "bg-secondary text-muted-foreground",
 };
 
 function elapsedLabel(since: string): string {
@@ -48,10 +50,12 @@ export function TableCard({
   orders,
   guestCount = 0,
   amountPaid = 0,
+  remaining = 0,
   onMarkPreparing,
   onMarkServed,
   onMarkReadyToPay,
   onMarkPaid,
+  onCloseTable,
   onCancelOrder,
 }: {
   table: RestaurantTable;
@@ -60,10 +64,12 @@ export function TableCard({
   /** Connected devices/guests at this table, from `table_participants` — distinct from `session.guestCount` (staff-set headcount). */
   guestCount?: number;
   amountPaid?: number;
+  remaining?: number;
   onMarkPreparing: (orderId: string) => void;
   onMarkServed: (orderId: string) => void;
   onMarkReadyToPay: (sessionId: string) => void;
   onMarkPaid: (sessionId: string) => void;
+  onCloseTable: (sessionId: string) => void;
   onCancelOrder: (orderId: string) => void;
 }) {
   useTicker();
@@ -109,10 +115,7 @@ export function TableCard({
               Paid <span className="font-medium text-foreground">AED {amountPaid.toLocaleString()}</span>
             </span>
             <span className="text-muted-foreground">
-              Remaining{" "}
-              <span className="font-medium text-foreground">
-                AED {Math.max(0, session.currentTotal - amountPaid).toLocaleString()}
-              </span>
+              Remaining <span className="font-medium text-foreground">AED {remaining.toLocaleString()}</span>
             </span>
           </div>
 
@@ -161,6 +164,15 @@ export function TableCard({
               >
                 <CheckCircle2 className="size-3" />
                 Paid
+              </button>
+            )}
+            {status === "paid" && (
+              <button
+                onClick={() => onCloseTable(session.id)}
+                className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
+              >
+                <DoorClosed className="size-3" />
+                Close Table
               </button>
             )}
             {activeOrder && (

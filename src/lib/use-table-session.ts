@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribeToSessionOrders } from "@/lib/qr-store";
 import { subscribeToSession } from "@/lib/live-store";
-import { calculateBill, createDemoPayment, type SessionBill } from "@/lib/bill-splitting";
 import type { SplitMode } from "@/lib/types";
 import {
   applyAddToCart,
@@ -11,8 +10,10 @@ import {
   applyRemoveFromCart,
   applyUpdateCartQuantity,
   buildCartItemId,
+  calculateBill,
   cancelSubmittedOrder as cancelSubmittedOrderRemote,
   canEditOrder,
+  createPayment,
   debugLog,
   editSubmittedOrder as editSubmittedOrderRemote,
   fetchRemotePatch,
@@ -31,6 +32,7 @@ import {
   subscribeToParticipants,
   subscribeToTableSession,
   updateParticipantName,
+  type SessionBill,
   type SubmitCartOptions,
   type TableSessionState,
 } from "@/lib/table-session-store";
@@ -51,7 +53,7 @@ export interface UseTableSessionResult {
   editOrderItem: (orderId: string, dish: string, quantity: number) => Promise<void>;
   cancelOrder: (orderId: string) => Promise<void>;
   requestBill: () => Promise<void>;
-  paySplit: (amount: number, splitMode: SplitMode) => Promise<void>;
+  paySplit: (amount: number, splitMode: SplitMode) => Promise<boolean>;
   renameSelf: (name: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -380,11 +382,12 @@ export function useTableSession(restaurantSlug: string, tableId: string | null):
     });
   }, [restaurantSlug]);
 
-  const paySplit = useCallback(async (amount: number, splitMode: SplitMode) => {
+  /** Returns whether the payment actually succeeded, so the bill UI can surface a failure instead of silently doing nothing. */
+  const paySplit = useCallback(async (amount: number, splitMode: SplitMode): Promise<boolean> => {
     const current = sessionRef.current;
-    if (!current?.dbSessionId || !selfParticipantId || amount <= 0) return;
+    if (!current?.dbSessionId || !selfParticipantId || amount <= 0) return false;
 
-    await createDemoPayment({
+    const payment = await createPayment({
       restaurantSlug,
       dbSessionId: current.dbSessionId,
       tableRowId: current.tableRowId,
@@ -397,6 +400,7 @@ export function useTableSession(restaurantSlug: string, tableId: string | null):
     await refresh();
     const latest = sessionRef.current;
     if (latest) setSessionBill(await calculateBill(latest));
+    return payment !== null;
   }, [restaurantSlug, selfParticipantId, refresh]);
 
   const renameSelf = useCallback(async (name: string) => {

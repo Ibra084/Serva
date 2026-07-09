@@ -1,38 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadLiveOrders, loadLiveSessions, loadTables, subscribeToLiveFloor } from "@/lib/live-store";
-import { loadParticipantsForSessions } from "@/lib/table-session-store";
-import { loadPayments } from "@/lib/payment-store";
-import type { LiveTableSession, Payment, QROrder, RestaurantTable, TableParticipant } from "@/lib/types";
+import { loadTables, subscribeToLiveFloor } from "@/lib/live-store";
+import { loadActiveSessionsForRestaurant, type ActiveSessionSummary } from "@/lib/table-session-store";
+import type { RestaurantTable } from "@/lib/types";
 
 const POLL_MS = 15_000;
 
-/** Live restaurant floor: tables + active sessions + orders + participants + payments, kept fresh via Supabase Realtime with a polling fallback. */
+/** Live restaurant floor: the full table registry, plus every active session (with its own orders/participants/payments/bill), kept fresh via Supabase Realtime with a polling fallback. */
 export function useLiveFloor(restaurantSlug: string) {
   const [tables, setTables] = useState<RestaurantTable[]>([]);
-  const [sessions, setSessions] = useState<LiveTableSession[]>([]);
-  const [orders, setOrders] = useState<QROrder[]>([]);
-  const [participants, setParticipants] = useState<TableParticipant[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [sessions, setSessions] = useState<ActiveSessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    const [nextTables, nextSessions, nextOrders, nextPayments] = await Promise.all([
+    const [nextTables, nextSessions] = await Promise.all([
       loadTables(restaurantSlug),
-      loadLiveSessions(restaurantSlug),
-      loadLiveOrders(restaurantSlug),
-      loadPayments(restaurantSlug),
+      loadActiveSessionsForRestaurant(restaurantSlug),
     ]);
-    const nextParticipants = await loadParticipantsForSessions(nextSessions.map((session) => session.id));
     setTables(nextTables);
     setSessions(nextSessions);
-    setOrders(nextOrders);
-    setPayments(nextPayments);
-    setParticipants(nextParticipants);
     setLoading(false);
     loadingRef.current = false;
   }, [restaurantSlug]);
@@ -47,5 +37,5 @@ export function useLiveFloor(restaurantSlug: string) {
     };
   }, [restaurantSlug, refresh]);
 
-  return { tables, sessions, orders, participants, payments, loading, refresh };
+  return { tables, sessions, loading, refresh };
 }

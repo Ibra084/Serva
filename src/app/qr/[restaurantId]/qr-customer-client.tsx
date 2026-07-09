@@ -257,8 +257,9 @@ export function QRCustomerClient({
 
   async function payBill(amount: number, splitMode: Parameters<typeof paySplit>[1]) {
     setPaying(true);
-    await paySplit(amount, splitMode);
+    const ok = await paySplit(amount, splitMode);
     setPaying(false);
+    return ok;
   }
 
   function handleWelcomeChoice(choice: WelcomeChoice) {

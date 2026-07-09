@@ -4,8 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { SERVICE_CHARGE_PCT, VAT_PCT } from "@/lib/payment-store";
 import { GuestStrip } from "@/components/qr/guest-strip";
 import { SplitBillPanel } from "@/components/qr/split-bill-panel";
-import type { TableSessionState } from "@/lib/table-session-store";
-import type { SessionBill } from "@/lib/bill-splitting";
+import { isParticipantConnected, type SessionBill, type TableSessionState } from "@/lib/table-session-store";
 import type { SplitMode, TableParticipant } from "@/lib/types";
 
 export function BillView({
@@ -25,14 +24,18 @@ export function BillView({
   paying: boolean;
   onBack: () => void;
   onRename: (name: string) => void;
-  onPaySplit: (amount: number, splitMode: SplitMode) => void;
+  onPaySplit: (amount: number, splitMode: SplitMode) => Promise<boolean>;
 }) {
   const orders = tableSession.submittedOrders.filter((order) => order.status !== "cancelled");
   const bill = sessionBill?.bill ?? { subtotal: 0, serviceCharge: 0, vat: 0, tip: 0, total: 0 };
   const paid = sessionBill?.paid ?? 0;
   const remaining = sessionBill?.remaining ?? bill.total;
   const isPaid = tableSession.paymentStatus === "paid";
-  const connectedGuestCount = participants.length || 1;
+  // Equal split only asks guests who are still here and haven't already paid anything — matching how
+  // the remaining balance keeps getting re-divided among the people actually still settling up.
+  const unpaidConnectedCount =
+    participants.filter((participant) => isParticipantConnected(participant) && participant.amountPaid <= 0).length ||
+    1;
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
@@ -118,7 +121,7 @@ export function BillView({
       {!isPaid && orders.length > 0 && (
         <SplitBillPanel
           remaining={remaining}
-          connectedGuestCount={connectedGuestCount}
+          connectedGuestCount={unpaidConnectedCount}
           paying={paying}
           onPay={onPaySplit}
         />

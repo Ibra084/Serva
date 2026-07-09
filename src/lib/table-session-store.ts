@@ -3,15 +3,39 @@
 import { newId, num } from "@/lib/db-utils";
 import { createClient } from "@/lib/supabase/client";
 import {
+  closeSession as closeSessionRemote,
   findActiveSessionForTable,
   findTableByNumber,
   getOrCreateActiveSession as getOrCreateDbSession,
+  loadLiveOrders,
+  loadLiveSessions,
   loadSessionById,
+  loadTables,
+  markSessionFullyPaid,
+  updateOrderStatus as updateOrderStatusRemote,
+  updateSessionPaymentStatus,
   updateSessionStatus,
   updateSessionTotal,
 } from "@/lib/live-store";
 import { loadSessionOrders, saveQROrder, updateQROrderItems, updateQROrderStatus } from "@/lib/qr-store";
-import type { LivePaymentStatus, LiveTableStatus, QRBasketItem, QROrder, TableParticipant } from "@/lib/types";
+import { computeBill, loadPayments, loadPaymentsForSession, processDemoPayment } from "@/lib/payment-store";
+import type {
+  Bill,
+  LivePaymentStatus,
+  LiveTableSession,
+  LiveTableStatus,
+  Payment,
+  QRBasketItem,
+  QROrder,
+  QROrderStatus,
+  RestaurantTable,
+  SplitMode,
+  TableParticipant,
+} from "@/lib/types";
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 const GUEST_ID_KEY = "serva_guest_id";
 const STORAGE_PREFIX = "serva:table-session:";
@@ -205,6 +229,16 @@ export async function getOrCreateActiveSession(restaurantSlug: string, tableId: 
   return writeLocalSession(hydrated);
 }
 
+/** Read-only alias for call sites that only ever expect an existing session, never create one. */
+export async function loadActiveSession(restaurantSlug: string, tableId: string): Promise<TableSessionState> {
+  return getOrCreateActiveSession(restaurantSlug, tableId);
+}
+
+/** Explicit whole-state persist — only for callers that already hold a fully up-to-date state (e.g. after `getOrCreateActiveSession`). Everyday mutations should go through `patchLocalSession` instead. */
+export function saveSession(session: TableSessionState): TableSessionState {
+  return writeLocalSession(touch(session));
+}
+
 // ============================================================================
 // Pure cart reducers — no I/O. Callers (the `useTableSession` hook) apply these
 // via functional state updates and persist the result themselves, so cart edits
@@ -343,6 +377,11 @@ export async function cancelSubmittedOrder(restaurantSlug: string, order: QROrde
 
 export async function requestBillForSession(restaurantSlug: string, dbSessionId: string): Promise<void> {
   await updateSessionStatus(restaurantSlug, dbSessionId, "ready_to_pay");
+}
+
+/** Staff-facing order status update (preparing/served/cancelled) — the one entry point the owner live view uses, so it shares this module's logic instead of calling `live-store` directly. */
+export async function updateOrderStatus(restaurantSlug: string, orderRowId: string, status: QROrderStatus): Promise<void> {
+  await updateOrderStatusRemote(restaurantSlug, orderRowId, status);
 }
 
 /**
@@ -484,6 +523,238 @@ export function subscribeToParticipants(dbSessionId: string, onChange: () => voi
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+// ============================================================================
+// Bill, payments, and session lifecycle. The table session is the source of
+// truth: orders and payments are always read *through* a session, never used
+// to replace or infer one, and only `closeSession` archives a session — every
+// other transition (including "paid") keeps it visible on the live floor.
+// ============================================================================
+
+export interface SessionBill {
+  bill: Bill;
+  paid: number;
+  remaining: number;
+}
+
+/** Derives the remaining balance from a bill total and what's already been paid. Pure. */
+export function calculateRemainingBalance(bill: Pick<Bill, "total">, paid: number): number {
+  return Math.max(0, round2(bill.total - paid));
+}
+
+/** Derives payment status from paid/remaining amounts. Pure — matches the DB's `payment_status` values. */
+export function getSessionPaymentStatus(remaining: number, paid: number): LivePaymentStatus {
+  if (remaining <= 0.01) return "paid";
+  if (paid > 0) return "partial";
+  return "unpaid";
+}
+
+/** The table's full bill (all active orders, no split applied) plus how much of it has already been paid. */
+export async function calculateBill(session: TableSessionState): Promise<SessionBill> {
+  const activeItems = session.submittedOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
+  const bill = computeBill({ items: activeItems, splitType: "full" });
+  if (!session.dbSessionId) return { bill, paid: 0, remaining: bill.total };
+
+  const payments = await loadPaymentsForSession(session.restaurantSlug, session.dbSessionId);
+  const paid = round2(payments.reduce((sum, payment) => sum + payment.amount, 0));
+  return { bill, paid, remaining: calculateRemainingBalance(bill, paid) };
+}
+
+/** Splits whatever remains equally across the given participants (recalculated live, not a fixed pre-assigned share). */
+export function calculateEqualSplit(remaining: number, participantCount: number): number {
+  if (participantCount <= 0) return remaining;
+  return round2(remaining / participantCount);
+}
+
+/** Validates custom per-participant amounts against the remaining balance; returns the balance left after them. */
+export function calculateCustomRemaining(
+  remaining: number,
+  customAmounts: number[]
+): { remainingAfter: number; valid: boolean } {
+  const total = customAmounts.reduce((sum, amount) => sum + (Number.isFinite(amount) ? amount : 0), 0);
+  return { remainingAfter: round2(remaining - total), valid: total <= remaining + 0.01 };
+}
+
+/** Re-sums orders/payments fresh from the DB and reconciles `payment_status`/`status` — never downgrades a session already marked "paid". */
+async function reconcileSessionPaymentStatus(restaurantSlug: string, dbSessionId: string): Promise<boolean> {
+  const [orders, payments] = await Promise.all([
+    loadSessionOrders(restaurantSlug, dbSessionId),
+    loadPaymentsForSession(restaurantSlug, dbSessionId),
+  ]);
+  const activeItems = orders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
+  const bill = computeBill({ items: activeItems, splitType: "full" });
+  const paid = round2(payments.reduce((sum, payment) => sum + payment.amount, 0));
+  await updateSessionTotal(restaurantSlug, dbSessionId, bill.total);
+
+  if (bill.total > 0 && paid + 0.01 >= bill.total) {
+    await markSessionFullyPaid(restaurantSlug, dbSessionId);
+    return true;
+  }
+
+  const session = await loadSessionById(dbSessionId);
+  if (session && session.paymentStatus !== "paid") {
+    await updateSessionPaymentStatus(restaurantSlug, dbSessionId, paid > 0 ? "partial" : "unpaid");
+  }
+  return false;
+}
+
+export interface CreatePaymentInput {
+  restaurantSlug: string;
+  dbSessionId: string;
+  tableRowId: string | null;
+  orderId: string | null;
+  /** Null for a staff-confirmed payment not attributed to a specific guest (see `markSessionPaid`). */
+  participantId: string | null;
+  amount: number;
+  splitMode: SplitMode;
+}
+
+/** Records one payment against the session (guest split payment, or a staff-confirmed settlement), then reconciles paid/remaining state. */
+export async function createPayment(input: CreatePaymentInput): Promise<Payment | null> {
+  const payment = await processDemoPayment({
+    restaurantSlug: input.restaurantSlug,
+    tableId: input.tableRowId,
+    sessionId: input.dbSessionId,
+    orderId: input.orderId,
+    participantId: input.participantId,
+    bill: { subtotal: 0, serviceCharge: 0, vat: 0, tip: 0, total: input.amount },
+    splitType: input.splitMode,
+    amount: input.amount,
+  });
+  if (!payment) return null;
+
+  if (input.participantId) {
+    const supabase = createClient();
+    const { data: participant } = await supabase
+      .from("table_participants")
+      .select("amount_paid")
+      .eq("id", input.participantId)
+      .maybeSingle();
+    const currentPaid = Number(participant?.amount_paid ?? 0);
+    await supabase
+      .from("table_participants")
+      .update({ amount_paid: currentPaid + input.amount })
+      .eq("id", input.participantId);
+  }
+
+  await reconcileSessionPaymentStatus(input.restaurantSlug, input.dbSessionId);
+  return payment;
+}
+
+/**
+ * Owner "Mark Paid" action. Never just flips a status flag: it covers whatever remains with a
+ * staff-confirmed payment record first, so the bill's paid/remaining math stays consistent with
+ * the payments table, then marks the session paid. Orders are left untouched. Does not close the
+ * table — it stays visible on the live floor (with a "Paid" badge) until `closeSession`.
+ */
+export async function markSessionPaid(restaurantSlug: string, dbSessionId: string): Promise<void> {
+  const [orders, payments] = await Promise.all([
+    loadSessionOrders(restaurantSlug, dbSessionId),
+    loadPaymentsForSession(restaurantSlug, dbSessionId),
+  ]);
+  const activeItems = orders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
+  const bill = computeBill({ items: activeItems, splitType: "full" });
+  const paid = round2(payments.reduce((sum, payment) => sum + payment.amount, 0));
+  const remaining = calculateRemainingBalance(bill, paid);
+
+  if (remaining > 0.01) {
+    await processDemoPayment({
+      restaurantSlug,
+      tableId: null,
+      sessionId: dbSessionId,
+      orderId: null,
+      participantId: null,
+      bill: { subtotal: 0, serviceCharge: 0, vat: 0, tip: 0, total: remaining },
+      splitType: "full",
+      amount: remaining,
+    });
+  }
+
+  await updateSessionTotal(restaurantSlug, dbSessionId, bill.total);
+  await markSessionFullyPaid(restaurantSlug, dbSessionId);
+}
+
+/** The only function that archives a table off the active live view — orders/payments/participants are untouched and remain queryable by session id. */
+export async function closeSession(restaurantSlug: string, dbSessionId: string): Promise<void> {
+  await closeSessionRemote(restaurantSlug, dbSessionId);
+}
+
+export interface ActiveSessionSummary {
+  table: RestaurantTable;
+  session: LiveTableSession;
+  orders: QROrder[];
+  participants: TableParticipant[];
+  payments: Payment[];
+  bill: Bill;
+  paid: number;
+  remaining: number;
+}
+
+/**
+ * The owner live view's single data source: every active (non-closed) session, joined with its own
+ * table, orders, participants, and payments, plus a computed bill/paid/remaining — so the portal never
+ * has to reassemble a session's state from four separately-fetched, separately-filtered arrays.
+ */
+export async function loadActiveSessionsForRestaurant(restaurantSlug: string): Promise<ActiveSessionSummary[]> {
+  const [tables, sessions, orders, payments] = await Promise.all([
+    loadTables(restaurantSlug),
+    loadLiveSessions(restaurantSlug),
+    loadLiveOrders(restaurantSlug),
+    loadPayments(restaurantSlug),
+  ]);
+  if (sessions.length === 0) return [];
+
+  const participants = await loadParticipantsForSessions(sessions.map((session) => session.id));
+
+  const tablesById = new Map(tables.map((table) => [table.id, table]));
+  const ordersBySession = new Map<string, QROrder[]>();
+  for (const order of orders) {
+    if (!order.sessionId) continue;
+    const list = ordersBySession.get(order.sessionId) ?? [];
+    list.push(order);
+    ordersBySession.set(order.sessionId, list);
+  }
+  const paymentsBySession = new Map<string, Payment[]>();
+  for (const payment of payments) {
+    if (!payment.sessionId || payment.status !== "paid") continue;
+    const list = paymentsBySession.get(payment.sessionId) ?? [];
+    list.push(payment);
+    paymentsBySession.set(payment.sessionId, list);
+  }
+  const participantsBySession = new Map<string, TableParticipant[]>();
+  for (const participant of participants) {
+    const list = participantsBySession.get(participant.sessionId) ?? [];
+    list.push(participant);
+    participantsBySession.set(participant.sessionId, list);
+  }
+
+  const summaries: ActiveSessionSummary[] = [];
+  for (const session of sessions) {
+    const table = tablesById.get(session.tableId);
+    if (!table) continue;
+    const sessionOrders = ordersBySession.get(session.id) ?? [];
+    const sessionPayments = paymentsBySession.get(session.id) ?? [];
+    const activeItems = sessionOrders.filter((order) => order.status !== "cancelled").flatMap((order) => order.items);
+    const bill = computeBill({ items: activeItems, splitType: "full" });
+    const paid = round2(sessionPayments.reduce((sum, payment) => sum + payment.amount, 0));
+    summaries.push({
+      table,
+      session,
+      orders: sessionOrders,
+      participants: participantsBySession.get(session.id) ?? [],
+      payments: sessionPayments,
+      bill,
+      paid,
+      remaining: calculateRemainingBalance(bill, paid),
+    });
+  }
+  return summaries;
+}
+
+export function connectedGuestLabel(participants: TableParticipant[]): string {
+  const count = participants.length;
+  return `${count} guest${count === 1 ? "" : "s"} viewing this table`;
 }
 
 export { parseSessionId, writeLocalSession, debugLog };

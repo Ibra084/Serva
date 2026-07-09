@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, CreditCard } from "lucide-react";
+import { AlertCircle, CheckCircle2, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { calculateCustomRemaining, calculateEqualSplit } from "@/lib/bill-splitting";
+import { calculateCustomRemaining, calculateEqualSplit } from "@/lib/table-session-store";
 import type { SplitMode } from "@/lib/types";
 
 const MODES: { key: SplitMode; label: string }[] = [
@@ -22,10 +22,11 @@ export function SplitBillPanel({
   remaining: number;
   connectedGuestCount: number;
   paying: boolean;
-  onPay: (amount: number, splitMode: SplitMode) => void;
+  onPay: (amount: number, splitMode: SplitMode) => Promise<boolean>;
 }) {
   const [mode, setMode] = useState<SplitMode>("equal");
   const [customAmount, setCustomAmount] = useState("");
+  const [error, setError] = useState(false);
 
   const equalShare = calculateEqualSplit(remaining, Math.max(1, connectedGuestCount));
   const customValue = Number(customAmount) || 0;
@@ -102,7 +103,11 @@ export function SplitBillPanel({
       )}
 
       <button
-        onClick={() => onPay(payAmount, mode)}
+        onClick={async () => {
+          setError(false);
+          const ok = await onPay(payAmount, mode);
+          if (!ok) setError(true);
+        }}
         disabled={paying || payAmount <= 0 || (mode === "custom" && !valid)}
         className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
       >
@@ -118,6 +123,12 @@ export function SplitBillPanel({
           </>
         )}
       </button>
+      {error && (
+        <p className="flex items-center justify-center gap-1.5 text-center text-xs text-destructive">
+          <AlertCircle className="size-3.5" />
+          Payment didn&rsquo;t go through — please try again.
+        </p>
+      )}
     </div>
   );
 }

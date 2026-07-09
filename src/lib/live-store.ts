@@ -87,7 +87,7 @@ export async function findTableByNumber(restaurantSlug: string, tableNumber: str
   return tables.find((table) => table.tableNumber === tableNumber) ?? null;
 }
 
-/** Owner-portal read of the live floor — active (non-paid, non-empty) sessions across all tables. */
+/** Owner-portal read of the live floor — every session not yet closed (includes "paid" ones, which stay visible until staff closes the table). */
 export async function loadLiveSessions(restaurantSlug: string): Promise<LiveTableSession[]> {
   const restaurantId = await resolveRestaurantId(restaurantSlug);
   if (!restaurantId) return [];
@@ -177,6 +177,11 @@ export function subscribeToSession(sessionId: string, onChange: () => void): () 
   };
 }
 
+/**
+ * Plain status setter — deliberately has no side effects on `payment_status` or `closed_at`. "Paid" and
+ * "closed" are different things: a paid table must stay visible on the live floor until staff explicitly
+ * close it (see `closeSession`/`markSessionFullyPaid`), otherwise marking paid instantly hides the session.
+ */
 export async function updateSessionStatus(
   restaurantSlug: string,
   sessionId: string,
@@ -186,12 +191,31 @@ export async function updateSessionStatus(
   if (!restaurantId) return;
 
   const supabase = createClient();
-  const updates: Record<string, unknown> = { status };
-  if (status === "paid") {
-    updates.payment_status = "paid";
-    updates.closed_at = new Date().toISOString();
-  }
-  await supabase.from("live_table_sessions").update(updates).eq("id", sessionId).eq("restaurant_id", restaurantId);
+  await supabase.from("live_table_sessions").update({ status }).eq("id", sessionId).eq("restaurant_id", restaurantId);
+}
+
+/** The one place `status` and `payment_status` flip to "paid" together — never touches `closed_at`, so the session stays on the live floor. */
+export async function markSessionFullyPaid(restaurantSlug: string, sessionId: string): Promise<void> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return;
+  const supabase = createClient();
+  await supabase
+    .from("live_table_sessions")
+    .update({ status: "paid", payment_status: "paid" })
+    .eq("id", sessionId)
+    .eq("restaurant_id", restaurantId);
+}
+
+/** The only function that sets `closed_at` — archives a table off the active live view. */
+export async function closeSession(restaurantSlug: string, sessionId: string): Promise<void> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return;
+  const supabase = createClient();
+  await supabase
+    .from("live_table_sessions")
+    .update({ status: "closed", closed_at: new Date().toISOString() })
+    .eq("id", sessionId)
+    .eq("restaurant_id", restaurantId);
 }
 
 export async function updateSessionPaymentStatus(

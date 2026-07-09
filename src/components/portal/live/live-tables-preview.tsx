@@ -16,13 +16,9 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export function LiveTablesPreview({ restaurantSlug }: { restaurantSlug: string }) {
-  const { tables, sessions, loading } = useLiveFloor(restaurantSlug);
+  const { sessions, loading } = useLiveFloor(restaurantSlug);
 
-  const sessionByTable = new Map(sessions.map((session) => [session.tableId, session]));
-  const preview = tables
-    .map((table) => ({ table, session: sessionByTable.get(table.id) ?? null }))
-    .filter((entry) => entry.session)
-    .slice(0, 4);
+  const preview = sessions.map(({ table, session }) => ({ table, session })).slice(0, 4);
 
   return (
     <Link
@@ -49,10 +45,10 @@ export function LiveTablesPreview({ restaurantSlug }: { restaurantSlug: string }
               <span
                 className={cn(
                   "mt-1 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                  STATUS_STYLE[session!.status]
+                  STATUS_STYLE[session.status]
                 )}
               >
-                {session!.status.replace("_", " ")}
+                {session.status.replace("_", " ")}
               </span>
             </div>
           ))}
