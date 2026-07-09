@@ -531,6 +531,7 @@ export function MenuBuilderClient({ restaurantSlug }: { restaurantSlug: string }
       </main>
 
       <ItemEditorSheet
+        restaurantSlug={restaurantSlug}
         open={editorOpen}
         onOpenChange={setEditorOpen}
         draft={editorDraft}

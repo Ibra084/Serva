@@ -153,6 +153,27 @@ export async function updateMenuItem(
   await supabase.from("menu_items").update(updates).eq("id", id).eq("restaurant_id", restaurantId);
 }
 
+export async function uploadMenuItemImage(
+  restaurantSlug: string,
+  file: File
+): Promise<{ url: string | null; error: string | null }> {
+  const restaurantId = await resolveRestaurantId(restaurantSlug);
+  if (!restaurantId) return { url: null, error: "Couldn't find this restaurant." };
+
+  const extension = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const path = `${restaurantId}/${newId()}.${extension}`;
+
+  const supabase = createClient();
+  const { error: uploadError } = await supabase.storage.from("menu-images").upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+  });
+  if (uploadError) return { url: null, error: "Couldn't upload image." };
+
+  const { data } = supabase.storage.from("menu-images").getPublicUrl(path);
+  return { url: data.publicUrl, error: null };
+}
+
 export async function deleteMenuItem(restaurantSlug: string, id: string): Promise<void> {
   const restaurantId = await resolveRestaurantId(restaurantSlug);
   if (!restaurantId) return;
