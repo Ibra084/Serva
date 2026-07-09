@@ -1,13 +1,15 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sparkles, UtensilsCrossed, ShieldAlert, ReceiptText } from "lucide-react";
+import { Sparkles, UtensilsCrossed, ReceiptText, ShoppingBag } from "lucide-react";
+import { GuestStrip } from "@/components/qr/guest-strip";
+import type { TableParticipant } from "@/lib/types";
 
 const CHOICES = [
-  { key: "choose", label: "Help me choose", icon: Sparkles },
-  { key: "browse", label: "Browse menu", icon: UtensilsCrossed },
-  { key: "allergies", label: "I have allergies", icon: ShieldAlert },
-  { key: "bill", label: "View my bill", icon: ReceiptText },
+  { key: "browse", label: "See Menu", icon: UtensilsCrossed },
+  { key: "choose", label: "Ask AI", icon: Sparkles },
+  { key: "bill", label: "View Bill", icon: ReceiptText },
+  { key: "startOrder", label: "Start Order", icon: ShoppingBag },
 ] as const;
 
 export type WelcomeChoice = (typeof CHOICES)[number]["key"];
@@ -16,14 +18,23 @@ export function WelcomeScreen({
   restaurantName,
   tableId,
   hasActiveSession,
+  participants = [],
+  selfParticipantId = null,
+  onRename,
   onChoose,
 }: {
   restaurantName: string;
   tableId: string | null;
   hasActiveSession: boolean;
+  participants?: TableParticipant[];
+  selfParticipantId?: string | null;
+  onRename?: (name: string) => void;
   onChoose: (choice: WelcomeChoice) => void;
 }) {
-  const choices = hasActiveSession ? CHOICES : CHOICES.filter((choice) => choice.key !== "bill");
+  // Exactly three primary actions: menu + AI are always present, the third depends on whether a bill exists yet.
+  const choices = CHOICES.filter((choice) =>
+    hasActiveSession ? choice.key !== "startOrder" : choice.key !== "bill"
+  );
 
   return (
     <div className="hero-wash flex flex-1 flex-col items-center justify-center px-5 py-10 text-center">
@@ -52,7 +63,13 @@ export function WelcomeScreen({
         Good to have you. What can we help you with today?
       </p>
 
-      <div className="mt-7 grid w-full max-w-sm grid-cols-2 gap-3">
+      {participants.length > 0 && onRename && (
+        <div className="mt-4 w-full max-w-sm">
+          <GuestStrip participants={participants} selfParticipantId={selfParticipantId} onRename={onRename} />
+        </div>
+      )}
+
+      <div className="mt-7 grid w-full max-w-sm grid-cols-3 gap-3">
         {choices.map((choice, index) => (
           <motion.button
             key={choice.key}

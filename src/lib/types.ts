@@ -367,7 +367,10 @@ export interface LiveTableSession {
   paymentStatus: LivePaymentStatus;
 }
 
-export type SplitType = "full" | "equal" | "items";
+export type SplitType = "full" | "equal" | "custom" | "items";
+
+/** Alias kept distinct for call sites that talk about "how the bill is split" rather than the payment row's shape. */
+export type SplitMode = SplitType;
 
 export interface Bill {
   subtotal: number;
@@ -383,12 +386,26 @@ export interface Payment {
   tableId: string | null;
   sessionId: string | null;
   orderId: string | null;
+  participantId: string | null;
   amount: number;
   tipAmount: number;
   method: string;
   status: "pending" | "paid" | "failed";
   splitType: SplitType;
   createdAt: string;
+}
+
+/** One device/guest joined to a table's shared `LiveTableSession`. */
+export interface TableParticipant {
+  id: string;
+  sessionId: string;
+  deviceId: string;
+  displayName: string;
+  joinedAt: string;
+  lastSeenAt: string;
+  isActive: boolean;
+  amountPaid: number;
+  assignedItems?: string[];
 }
 
 export interface AssistantAnswer {

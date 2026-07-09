@@ -9,7 +9,7 @@ import { useLiveFloor } from "@/lib/use-live-data";
 import { cancelOrder, updateOrderStatus, updateSessionStatus } from "@/lib/live-store";
 
 export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
-  const { tables, sessions, orders, loading, refresh } = useLiveFloor(restaurantSlug);
+  const { tables, sessions, orders, participants, payments, loading, refresh } = useLiveFloor(restaurantSlug);
 
   const sessionByTable = useMemo(() => {
     const map = new Map<string, (typeof sessions)[number]>();
@@ -27,6 +27,23 @@ export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
     }
     return map;
   }, [orders]);
+
+  const guestCountBySession = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const participant of participants) {
+      map.set(participant.sessionId, (map.get(participant.sessionId) ?? 0) + 1);
+    }
+    return map;
+  }, [participants]);
+
+  const paidBySession = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const payment of payments) {
+      if (!payment.sessionId || payment.status !== "paid") continue;
+      map.set(payment.sessionId, (map.get(payment.sessionId) ?? 0) + payment.amount);
+    }
+    return map;
+  }, [payments]);
 
   const occupiedCount = sessions.filter((session) => session.status !== "paid").length;
 
@@ -58,12 +75,16 @@ export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
             {tables.map((table) => {
               const session = sessionByTable.get(table.id) ?? null;
               const tableOrders = session ? ordersBySession.get(session.id) ?? [] : [];
+              const guestCount = session ? guestCountBySession.get(session.id) ?? 0 : 0;
+              const paid = session ? paidBySession.get(session.id) ?? 0 : 0;
               return (
                 <TableCard
                   key={table.id}
                   table={table}
                   session={session}
                   orders={tableOrders}
+                  guestCount={guestCount}
+                  amountPaid={paid}
                   onMarkPreparing={(orderId) => act(() => updateOrderStatus(restaurantSlug, orderId, "preparing"))}
                   onMarkServed={(orderId) => act(() => updateOrderStatus(restaurantSlug, orderId, "served"))}
                   onMarkReadyToPay={(sessionId) =>

@@ -46,6 +46,8 @@ export function TableCard({
   table,
   session,
   orders,
+  guestCount = 0,
+  amountPaid = 0,
   onMarkPreparing,
   onMarkServed,
   onMarkReadyToPay,
@@ -55,6 +57,9 @@ export function TableCard({
   table: RestaurantTable;
   session: LiveTableSession | null;
   orders: QROrder[];
+  /** Connected devices/guests at this table, from `table_participants` — distinct from `session.guestCount` (staff-set headcount). */
+  guestCount?: number;
+  amountPaid?: number;
   onMarkPreparing: (orderId: string) => void;
   onMarkServed: (orderId: string) => void;
   onMarkReadyToPay: (sessionId: string) => void;
@@ -89,7 +94,7 @@ export function TableCard({
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Users className="size-3.5" />
-              {session.guestCount} guest{session.guestCount === 1 ? "" : "s"}
+              {guestCount > 0 ? `${guestCount} connected` : `${session.guestCount} guest${session.guestCount === 1 ? "" : "s"}`}
             </span>
             <span>{elapsedLabel(session.startedAt)} ago</span>
           </div>
@@ -97,6 +102,18 @@ export function TableCard({
           <div className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2">
             <span className="text-xs text-muted-foreground">Bill total</span>
             <span className="text-sm font-medium text-foreground">AED {session.currentTotal.toLocaleString()}</span>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-muted-foreground">
+              Paid <span className="font-medium text-foreground">AED {amountPaid.toLocaleString()}</span>
+            </span>
+            <span className="text-muted-foreground">
+              Remaining{" "}
+              <span className="font-medium text-foreground">
+                AED {Math.max(0, session.currentTotal - amountPaid).toLocaleString()}
+              </span>
+            </span>
           </div>
 
           {latestItems.length > 0 && (

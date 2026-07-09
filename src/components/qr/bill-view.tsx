@@ -1,22 +1,38 @@
 "use client";
 
-import { ChevronLeft, CreditCard } from "lucide-react";
-import { computeBill, SERVICE_CHARGE_PCT, VAT_PCT } from "@/lib/payment-store";
+import { ChevronLeft } from "lucide-react";
+import { SERVICE_CHARGE_PCT, VAT_PCT } from "@/lib/payment-store";
+import { GuestStrip } from "@/components/qr/guest-strip";
+import { SplitBillPanel } from "@/components/qr/split-bill-panel";
 import type { TableSessionState } from "@/lib/table-session-store";
+import type { SessionBill } from "@/lib/bill-splitting";
+import type { SplitMode, TableParticipant } from "@/lib/types";
 
 export function BillView({
   tableSession,
+  sessionBill,
+  participants,
+  selfParticipantId,
+  paying,
   onBack,
-  onPay,
+  onRename,
+  onPaySplit,
 }: {
   tableSession: TableSessionState;
+  sessionBill: SessionBill | null;
+  participants: TableParticipant[];
+  selfParticipantId: string | null;
+  paying: boolean;
   onBack: () => void;
-  onPay: () => void;
+  onRename: (name: string) => void;
+  onPaySplit: (amount: number, splitMode: SplitMode) => void;
 }) {
   const orders = tableSession.submittedOrders.filter((order) => order.status !== "cancelled");
-  const allItems = orders.flatMap((order) => order.items);
-  const bill = computeBill({ items: allItems, splitType: "full" });
+  const bill = sessionBill?.bill ?? { subtotal: 0, serviceCharge: 0, vat: 0, tip: 0, total: 0 };
+  const paid = sessionBill?.paid ?? 0;
+  const remaining = sessionBill?.remaining ?? bill.total;
   const isPaid = tableSession.paymentStatus === "paid";
+  const connectedGuestCount = participants.length || 1;
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
@@ -32,6 +48,8 @@ export function BillView({
         <h2 className="font-serif text-xl font-medium tracking-tight text-foreground">Your bill</h2>
         <p className="mt-1 text-sm text-muted-foreground">Table {tableSession.tableId}</p>
       </div>
+
+      <GuestStrip participants={participants} selfParticipantId={selfParticipantId} onRename={onRename} />
 
       {orders.length === 0 ? (
         <p className="text-sm text-muted-foreground">No orders yet.</p>
@@ -83,20 +101,27 @@ export function BillView({
           <span>Total</span>
           <span className="font-serif text-primary">AED {bill.total.toLocaleString()}</span>
         </div>
+        <div className="mt-1 flex items-center justify-between text-muted-foreground">
+          <span>Paid</span>
+          <span className="text-foreground">AED {paid.toLocaleString()}</span>
+        </div>
+        <div className="flex items-center justify-between text-muted-foreground">
+          <span>Remaining</span>
+          <span className="font-medium text-foreground">AED {remaining.toLocaleString()}</span>
+        </div>
         <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
           <span>Payment status</span>
-          <span className="font-medium text-foreground">{isPaid ? "Paid" : "Unpaid"}</span>
+          <span className="font-medium text-foreground">{isPaid ? "Paid" : paid > 0 ? "Partially paid" : "Unpaid"}</span>
         </div>
       </div>
 
       {!isPaid && orders.length > 0 && (
-        <button
-          onClick={onPay}
-          className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-[var(--accent-hover)]"
-        >
-          <CreditCard className="size-4" />
-          Pay Demo Bill
-        </button>
+        <SplitBillPanel
+          remaining={remaining}
+          connectedGuestCount={connectedGuestCount}
+          paying={paying}
+          onPay={onPaySplit}
+        />
       )}
     </div>
   );

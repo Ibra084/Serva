@@ -1,6 +1,7 @@
 "use client";
 
-import { newId } from "@/lib/db-utils";
+import { newId, num } from "@/lib/db-utils";
+import { createClient } from "@/lib/supabase/client";
 import {
   findActiveSessionForTable,
   findTableByNumber,
@@ -11,11 +12,15 @@ import {
   updateSessionTotal,
 } from "@/lib/live-store";
 import { loadSessionOrders, saveQROrder, updateQROrderItems, updateQROrderStatus } from "@/lib/qr-store";
-import type { LivePaymentStatus, LiveTableStatus, QRBasketItem, QROrder } from "@/lib/types";
+import type { LivePaymentStatus, LiveTableStatus, QRBasketItem, QROrder, TableParticipant } from "@/lib/types";
 
 const GUEST_ID_KEY = "serva_guest_id";
 const STORAGE_PREFIX = "serva:table-session:";
 const CHANGE_EVENT = "serva:table-session-changed";
+
+/** A participant is considered connected if it has heartbeated within this window (3x the poll interval). */
+export const PARTICIPANT_ACTIVE_WINDOW_MS = 15_000;
+export const PARTICIPANT_POLL_MS = 4_000;
 
 /** Customers may edit or cancel a freshly submitted order for this long, while it's still "new". */
 export const EDIT_WINDOW_MS = 2 * 60 * 1000;
@@ -355,6 +360,132 @@ export function subscribeToTableSession(sessionId: string, onChange: () => void)
   }
   window.addEventListener("storage", handleStorage);
   return () => window.removeEventListener("storage", handleStorage);
+}
+
+// ============================================================================
+// Participants: multiple devices joined to the same table's shared session.
+// ============================================================================
+
+function rowToParticipant(row: Record<string, unknown>): TableParticipant {
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    deviceId: row.device_id as string,
+    displayName: row.display_name as string,
+    joinedAt: row.joined_at as string,
+    lastSeenAt: row.last_seen_at as string,
+    isActive: Boolean(row.is_active),
+    amountPaid: num(row.amount_paid),
+    assignedItems: (row.assigned_items as string[] | null) ?? undefined,
+  };
+}
+
+export function isParticipantConnected(participant: TableParticipant): boolean {
+  return participant.isActive && Date.now() - new Date(participant.lastSeenAt).getTime() < PARTICIPANT_ACTIVE_WINDOW_MS;
+}
+
+/**
+ * Registers this device as a participant of the table's shared DB session (creating the row on first
+ * visit, refreshing `lastSeenAt` on repeat visits), defaulting its display name to "Guest N" by join order.
+ * No-ops (returns null) until the table has a resolved shared session — i.e. before any order exists.
+ */
+export async function joinTableSession(
+  restaurantSlug: string,
+  dbSessionId: string,
+  deviceId: string
+): Promise<TableParticipant | null> {
+  const supabase = createClient();
+  const { data: existing } = await supabase
+    .from("table_participants")
+    .select("*")
+    .eq("session_id", dbSessionId)
+    .eq("device_id", deviceId)
+    .maybeSingle();
+
+  if (existing) {
+    const { data: touched } = await supabase
+      .from("table_participants")
+      .update({ last_seen_at: new Date().toISOString(), is_active: true })
+      .eq("id", existing.id)
+      .select("*")
+      .maybeSingle();
+    return rowToParticipant(touched ?? existing);
+  }
+
+  const { count } = await supabase
+    .from("table_participants")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", dbSessionId);
+
+  const { data: created, error } = await supabase
+    .from("table_participants")
+    .insert({
+      session_id: dbSessionId,
+      device_id: deviceId,
+      display_name: `Guest ${(count ?? 0) + 1}`,
+    })
+    .select("*")
+    .maybeSingle();
+  if (error || !created) return null;
+  return rowToParticipant(created);
+}
+
+export async function updateParticipantName(participantId: string, name: string): Promise<TableParticipant | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("table_participants")
+    .update({ display_name: trimmed })
+    .eq("id", participantId)
+    .select("*")
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToParticipant(data);
+}
+
+/** Call on a timer while a device is on the QR page, so other devices see it as connected. */
+export async function heartbeatParticipant(participantId: string): Promise<void> {
+  const supabase = createClient();
+  await supabase
+    .from("table_participants")
+    .update({ last_seen_at: new Date().toISOString(), is_active: true })
+    .eq("id", participantId);
+}
+
+/** All participants for the table's shared session, connected ones first. */
+export async function getActiveParticipants(dbSessionId: string): Promise<TableParticipant[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("table_participants")
+    .select("*")
+    .eq("session_id", dbSessionId)
+    .order("joined_at", { ascending: true });
+  return (data ?? []).map(rowToParticipant);
+}
+
+/** Owner-portal read: participants across several sessions at once (e.g. the whole live floor). */
+export async function loadParticipantsForSessions(sessionIds: string[]): Promise<TableParticipant[]> {
+  if (sessionIds.length === 0) return [];
+  const supabase = createClient();
+  const { data } = await supabase.from("table_participants").select("*").in("session_id", sessionIds);
+  return (data ?? []).map(rowToParticipant);
+}
+
+/** Subscribes to realtime participant changes for one session; caller should also poll as a fallback. Returns an unsubscribe fn. */
+export function subscribeToParticipants(dbSessionId: string, onChange: () => void): () => void {
+  const supabase = createClient();
+  const channel = supabase
+    .channel(`participants-${dbSessionId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "table_participants", filter: `session_id=eq.${dbSessionId}` },
+      onChange
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 export { parseSessionId };

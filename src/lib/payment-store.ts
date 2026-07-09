@@ -53,8 +53,11 @@ export interface DemoPaymentInput {
   tableId: string | null;
   sessionId: string | null;
   orderId: string | null;
+  participantId?: string | null;
   bill: Bill;
   splitType: SplitType;
+  /** Overrides `bill.total` as the charged amount — used when a participant pays a specific split share. */
+  amount?: number;
 }
 
 /**
@@ -73,7 +76,8 @@ export async function processDemoPayment(input: DemoPaymentInput): Promise<Payme
       table_id: input.tableId,
       session_id: input.sessionId,
       order_id: input.orderId,
-      amount: input.bill.total,
+      participant_id: input.participantId ?? null,
+      amount: input.amount ?? input.bill.total,
       tip_amount: input.bill.tip,
       method: "demo",
       status: "paid",
@@ -93,6 +97,7 @@ function rowToPayment(row: Record<string, unknown>, restaurantSlug: string): Pay
     tableId: (row.table_id as string | null) ?? null,
     sessionId: (row.session_id as string | null) ?? null,
     orderId: (row.order_id as string | null) ?? null,
+    participantId: (row.participant_id as string | null) ?? null,
     amount: num(row.amount),
     tipAmount: num(row.tip_amount),
     method: row.method as string,
@@ -112,6 +117,19 @@ export async function loadPayments(restaurantSlug: string): Promise<Payment[]> {
     .from("payments")
     .select("*")
     .eq("restaurant_id", restaurantId)
+    .order("created_at", { ascending: false });
+
+  return (data ?? []).map((row) => rowToPayment(row, restaurantSlug));
+}
+
+/** Anonymous-safe: reads paid payments for one shared table session, used to derive the remaining balance. */
+export async function loadPaymentsForSession(restaurantSlug: string, dbSessionId: string): Promise<Payment[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("session_id", dbSessionId)
+    .eq("status", "paid")
     .order("created_at", { ascending: false });
 
   return (data ?? []).map((row) => rowToPayment(row, restaurantSlug));
