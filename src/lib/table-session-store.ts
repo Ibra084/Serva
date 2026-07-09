@@ -7,7 +7,6 @@ import {
   findTableByNumber,
   getOrCreateActiveSession as getOrCreateDbSession,
   loadSessionById,
-  updateSessionPaymentStatus,
   updateSessionStatus,
   updateSessionTotal,
 } from "@/lib/live-store";
@@ -22,6 +21,9 @@ const CHANGE_EVENT = "serva:table-session-changed";
 export const PARTICIPANT_ACTIVE_WINDOW_MS = 15_000;
 export const PARTICIPANT_POLL_MS = 4_000;
 
+/** How often the hook re-pulls the table's shared session/orders as a realtime fallback. */
+export const REMOTE_POLL_MS = 5_000;
+
 /** Customers may edit or cancel a freshly submitted order for this long, while it's still "new". */
 export const EDIT_WINDOW_MS = 2 * 60 * 1000;
 
@@ -35,7 +37,7 @@ export interface TableSessionState {
   tableRowId: string | null;
   /** Resolved `live_table_sessions.id` — the shared, table-wide session in Supabase. */
   dbSessionId: string | null;
-  /** Private to this guest/device — never shared with other guests at the table. */
+  /** Private to this guest/device — never shared with other guests at the table, and never touched by remote merges. */
   cartItems: QRBasketItem[];
   /** Table-wide — hydrated from Supabase so every guest at the table sees the same bill. */
   submittedOrders: QROrder[];
@@ -44,6 +46,17 @@ export interface TableSessionState {
   paymentStatus: LivePaymentStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Fields owned by the remote (Supabase) side of the session — safe to merge in from a background refresh without ever touching the cart. */
+export type RemoteSessionPatch = Pick<
+  TableSessionState,
+  "tableRowId" | "dbSessionId" | "orderStatus" | "paymentStatus" | "submittedOrders" | "currentBillTotal"
+>;
+
+const DEBUG = process.env.NODE_ENV !== "production";
+function debugLog(event: string, sessionId: string, cartCount: number) {
+  if (DEBUG) console.debug(`[table-session] ${event}`, { sessionId, cartCount });
 }
 
 function buildSessionId(restaurantSlug: string, tableId: string, guestId: string): string {
@@ -65,7 +78,7 @@ export function getAnonymousGuestId(): string {
   return id;
 }
 
-function readLocal(sessionId: string): TableSessionState | null {
+export function readLocalSession(sessionId: string): TableSessionState | null {
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(STORAGE_PREFIX + sessionId);
   if (!raw) return null;
@@ -76,7 +89,17 @@ function readLocal(sessionId: string): TableSessionState | null {
   }
 }
 
-function writeLocal(state: TableSessionState): TableSessionState {
+function touch(state: TableSessionState): TableSessionState {
+  return { ...state, updatedAt: new Date().toISOString() };
+}
+
+/**
+ * Overwrites the entire stored session — only safe to use right after reading (session bootstrap)
+ * or when a single user action intentionally changes both cart and order state together (submit).
+ * Everywhere else, use `patchLocalSession`, which re-reads before merging so a slow background
+ * write can never clobber a field it doesn't own (see module docs below).
+ */
+function writeLocalSession(state: TableSessionState): TableSessionState {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_PREFIX + state.sessionId, JSON.stringify(state));
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { sessionId: state.sessionId } }));
@@ -84,8 +107,17 @@ function writeLocal(state: TableSessionState): TableSessionState {
   return state;
 }
 
-function touch(state: TableSessionState): TableSessionState {
-  return { ...state, updatedAt: new Date().toISOString() };
+/**
+ * Read-patch-write: always re-reads the current stored session and merges only the given fields
+ * onto it before writing back. This is the key to avoiding lost updates — a background remote
+ * refresh that takes 500ms can only ever overwrite the fields it explicitly patches (e.g. orders,
+ * payment status), never a cart item the user added while that refresh was in flight, because it
+ * never touches cartItems, and it merges onto whatever is on disk *now*, not a stale snapshot.
+ */
+export function patchLocalSession(sessionId: string, patch: Partial<TableSessionState>): TableSessionState | null {
+  const current = readLocalSession(sessionId);
+  if (!current) return null;
+  return writeLocalSession(touch({ ...current, ...patch }));
 }
 
 function newState(restaurantSlug: string, tableId: string, guestId: string): TableSessionState {
@@ -112,11 +144,13 @@ function computeBillTotal(orders: QROrder[]): number {
 }
 
 /**
- * Pulls the table's shared session/orders down from Supabase and mirrors them onto local state.
- * Table-wide fields (submittedOrders/status/bill) are resolved by table, not by guest, so every
- * guest at the same table sees the same bill; `cartItems` is left untouched since it's private.
+ * Pulls the table's shared session/orders down from Supabase and returns the remote-owned patch.
+ * Never returns/touches `cartItems` — callers merge this patch onto whatever the current in-memory
+ * (or on-disk) cart is, so a slow fetch can't resurrect a stale cart.
  */
-async function hydrateFromRemote(state: TableSessionState): Promise<TableSessionState> {
+export async function fetchRemotePatch(
+  state: Pick<TableSessionState, "restaurantSlug" | "tableId" | "tableRowId" | "dbSessionId">
+): Promise<RemoteSessionPatch> {
   let tableRowId = state.tableRowId;
   if (!tableRowId) {
     const table = await findTableByNumber(state.restaurantSlug, state.tableId);
@@ -129,9 +163,9 @@ async function hydrateFromRemote(state: TableSessionState): Promise<TableSession
     dbSessionId = active?.id ?? null;
   }
 
-  let orderStatus = state.orderStatus;
-  let paymentStatus = state.paymentStatus;
-  let submittedOrders = state.submittedOrders;
+  let orderStatus: LiveTableStatus | "none" = "none";
+  let paymentStatus: LivePaymentStatus = "unpaid";
+  let submittedOrders: QROrder[] = [];
 
   if (dbSessionId) {
     const [session, orders] = await Promise.all([
@@ -145,68 +179,70 @@ async function hydrateFromRemote(state: TableSessionState): Promise<TableSession
     submittedOrders = orders;
   }
 
-  return touch({
-    ...state,
+  return {
     tableRowId,
     dbSessionId,
     orderStatus,
     paymentStatus,
     submittedOrders,
     currentBillTotal: computeBillTotal(submittedOrders),
-  });
+  };
 }
 
-/** Loads (and hydrates) the active session for this restaurant/table on this device, creating a fresh local one if none exists yet. */
+/**
+ * Loads (and hydrates) the active session for this restaurant/table on this device, creating a fresh
+ * local one if none exists yet. Called once on mount by `useTableSession` (guarded against Strict
+ * Mode's double-invoke there); the remote `getOrCreateActiveSession` in `live-store` is itself
+ * find-then-create, so re-running this is also safe — it never creates a second shared session.
+ */
 export async function getOrCreateActiveSession(restaurantSlug: string, tableId: string): Promise<TableSessionState> {
   const guestId = getAnonymousGuestId();
   const sessionId = buildSessionId(restaurantSlug, tableId, guestId);
-  const local = readLocal(sessionId) ?? newState(restaurantSlug, tableId, guestId);
-  const hydrated = await hydrateFromRemote(local);
-  return writeLocal(hydrated);
+  const local = readLocalSession(sessionId) ?? newState(restaurantSlug, tableId, guestId);
+  const patch = await fetchRemotePatch(local);
+  const hydrated = touch({ ...local, ...patch });
+  debugLog("session loaded", hydrated.sessionId, hydrated.cartItems.length);
+  return writeLocalSession(hydrated);
 }
 
-/** Same as `getOrCreateActiveSession` — kept as a distinct name to match read-only call sites. */
-export async function loadActiveSession(restaurantSlug: string, tableId: string): Promise<TableSessionState> {
-  return getOrCreateActiveSession(restaurantSlug, tableId);
+// ============================================================================
+// Pure cart reducers — no I/O. Callers (the `useTableSession` hook) apply these
+// via functional state updates and persist the result themselves, so cart edits
+// always compose against the freshest in-memory state rather than a re-read
+// that could race with an in-flight remote refresh.
+// ============================================================================
+
+/** Stable identity for a cart line. Customizations aren't modeled yet, so this is just the dish name — the same item never gets a second line unless a customization hash is later added. */
+export function buildCartItemId(dish: string, customizationHash = ""): string {
+  return customizationHash ? `${dish}::${customizationHash}` : dish;
 }
 
-export function saveSession(state: TableSessionState): TableSessionState {
-  return writeLocal(touch(state));
+export function applyAddToCart(state: TableSessionState, item: QRBasketItem, customizationHash = ""): TableSessionState {
+  const cartItemId = buildCartItemId(item.dish, customizationHash);
+  const existingIndex = state.cartItems.findIndex((entry) => buildCartItemId(entry.dish) === cartItemId);
+  const cartItems =
+    existingIndex >= 0
+      ? state.cartItems.map((entry, index) =>
+          index === existingIndex ? { ...entry, quantity: entry.quantity + item.quantity } : entry
+        )
+      : [...state.cartItems, item];
+  return touch({ ...state, cartItems });
 }
 
-function requireState(sessionId: string): TableSessionState {
-  const state = readLocal(sessionId);
-  if (!state) throw new Error(`No table session found for ${sessionId}`);
-  return state;
-}
-
-export function addCartItem(sessionId: string, item: QRBasketItem): TableSessionState {
-  const state = requireState(sessionId);
-  const existing = state.cartItems.find((entry) => entry.dish === item.dish);
-  const cartItems = existing
-    ? state.cartItems.map((entry) =>
-        entry.dish === item.dish ? { ...entry, quantity: entry.quantity + item.quantity } : entry
-      )
-    : [...state.cartItems, item];
-  return saveSession({ ...state, cartItems });
-}
-
-export function updateCartItem(sessionId: string, dish: string, quantity: number): TableSessionState {
-  const state = requireState(sessionId);
+export function applyUpdateCartQuantity(state: TableSessionState, cartItemId: string, quantity: number): TableSessionState {
   const cartItems =
     quantity <= 0
-      ? state.cartItems.filter((entry) => entry.dish !== dish)
-      : state.cartItems.map((entry) => (entry.dish === dish ? { ...entry, quantity } : entry));
-  return saveSession({ ...state, cartItems });
+      ? state.cartItems.filter((entry) => buildCartItemId(entry.dish) !== cartItemId)
+      : state.cartItems.map((entry) => (buildCartItemId(entry.dish) === cartItemId ? { ...entry, quantity } : entry));
+  return touch({ ...state, cartItems });
 }
 
-export function removeCartItem(sessionId: string, dish: string): TableSessionState {
-  return updateCartItem(sessionId, dish, 0);
+export function applyRemoveFromCart(state: TableSessionState, cartItemId: string): TableSessionState {
+  return applyUpdateCartQuantity(state, cartItemId, 0);
 }
 
-export function clearCart(sessionId: string): TableSessionState {
-  const state = requireState(sessionId);
-  return saveSession({ ...state, cartItems: [] });
+export function applyClearCart(state: TableSessionState): TableSessionState {
+  return touch({ ...state, cartItems: [] });
 }
 
 export interface SubmitCartOptions {
@@ -214,54 +250,65 @@ export interface SubmitCartOptions {
   aiRecommendedItems?: string[];
 }
 
-/** Submits the current cart as a new order under the table's shared session, without touching any prior orders. */
-export async function submitCartAsOrder(sessionId: string, options: SubmitCartOptions = {}): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  if (state.cartItems.length === 0) return state;
+export interface SubmitCartPreparation {
+  /** Optimistic order to show immediately — items/subtotal are a snapshot of the cart at submit time. */
+  optimisticOrder: QROrder;
+}
 
+/** Builds the optimistic order for a cart snapshot. Pure — no I/O, no state mutation. */
+export function prepareSubmitCart(
+  state: Pick<TableSessionState, "restaurantSlug" | "tableId" | "cartItems" | "dbSessionId">,
+  options: SubmitCartOptions = {}
+): SubmitCartPreparation {
+  const subtotal = state.cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  return {
+    optimisticOrder: {
+      orderId: newId(),
+      restaurantId: state.restaurantSlug,
+      tableId: state.tableId,
+      sessionId: state.dbSessionId,
+      timestamp: new Date().toISOString(),
+      items: state.cartItems,
+      subtotal,
+      source: "qr",
+      aiRecommendedItems: options.aiRecommendedItems ?? [],
+      specialRequests: options.specialRequests?.trim() ?? "",
+      status: "new",
+    },
+  };
+}
+
+export interface SubmitCartResult {
+  tableRowId: string | null;
+  dbSessionId: string | null;
+  orderRowId: string | null;
+}
+
+/** The network half of submitting an order: resolves table/session rows and inserts the order. No local state/storage side effects. */
+export async function persistSubmittedOrder(
+  restaurantSlug: string,
+  state: Pick<TableSessionState, "tableId" | "tableRowId" | "dbSessionId" | "currentBillTotal">,
+  order: QROrder
+): Promise<SubmitCartResult> {
   let tableRowId = state.tableRowId;
   if (!tableRowId) {
-    const table = await findTableByNumber(state.restaurantSlug, state.tableId);
+    const table = await findTableByNumber(restaurantSlug, state.tableId);
     tableRowId = table?.id ?? null;
   }
 
   let dbSessionId = state.dbSessionId;
   if (tableRowId && !dbSessionId) {
-    const dbSession = await getOrCreateDbSession(state.restaurantSlug, tableRowId);
+    const dbSession = await getOrCreateDbSession(restaurantSlug, tableRowId);
     dbSessionId = dbSession?.id ?? null;
   }
 
-  const subtotal = state.cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const order: QROrder = {
-    orderId: newId(),
-    restaurantId: state.restaurantSlug,
-    tableId: state.tableId,
-    sessionId: dbSessionId,
-    timestamp: new Date().toISOString(),
-    items: state.cartItems,
-    subtotal,
-    source: "qr",
-    aiRecommendedItems: options.aiRecommendedItems ?? [],
-    specialRequests: options.specialRequests?.trim() ?? "",
-    status: "new",
-  };
-
-  const orderRowId = await saveQROrder(state.restaurantSlug, order);
+  const orderRowId = await saveQROrder(restaurantSlug, { ...order, sessionId: dbSessionId });
   if (dbSessionId) {
-    await updateSessionStatus(state.restaurantSlug, dbSessionId, "order_placed");
-    await updateSessionTotal(state.restaurantSlug, dbSessionId, state.currentBillTotal + subtotal);
+    await updateSessionStatus(restaurantSlug, dbSessionId, "order_placed");
+    await updateSessionTotal(restaurantSlug, dbSessionId, state.currentBillTotal + order.subtotal);
   }
 
-  const submittedOrder: QROrder = { ...order, id: orderRowId ?? undefined };
-  return saveSession({
-    ...state,
-    tableRowId,
-    dbSessionId,
-    cartItems: [],
-    submittedOrders: [submittedOrder, ...state.submittedOrders],
-    currentBillTotal: state.currentBillTotal + subtotal,
-    orderStatus: "order_placed",
-  });
+  return { tableRowId, dbSessionId, orderRowId };
 }
 
 export function editWindowRemainingMs(order: QROrder): number {
@@ -274,85 +321,36 @@ export function canEditOrder(order: QROrder): boolean {
   return order.status === "new" && editWindowRemainingMs(order) > 0;
 }
 
-/** Edits/resubmits a not-yet-locked order's items in place. No-ops once the edit window has closed or the order isn't "new". */
+/** Edits/resubmits a not-yet-locked order's items in place. No-ops once the edit window has closed or the order isn't "new". Network + pure result only — no storage side effects. */
 export async function editSubmittedOrder(
-  sessionId: string,
-  orderId: string,
+  restaurantSlug: string,
+  order: QROrder,
   updatedItems: QRBasketItem[]
-): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  const order = state.submittedOrders.find((entry) => entry.orderId === orderId);
-  if (!order?.id || !canEditOrder(order)) return state;
-
+): Promise<{ items: QRBasketItem[]; subtotal: number; delta: number } | null> {
+  if (!order.id || !canEditOrder(order)) return null;
   const subtotal = updatedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const ok = await updateQROrderItems(state.restaurantSlug, order.id, updatedItems, subtotal);
-  if (!ok) return state;
-
-  const delta = subtotal - order.subtotal;
-  if (state.dbSessionId) {
-    await updateSessionTotal(state.restaurantSlug, state.dbSessionId, state.currentBillTotal + delta);
-  }
-
-  return saveSession({
-    ...state,
-    submittedOrders: state.submittedOrders.map((entry) =>
-      entry.orderId === orderId ? { ...entry, items: updatedItems, subtotal } : entry
-    ),
-    currentBillTotal: state.currentBillTotal + delta,
-  });
+  const ok = await updateQROrderItems(restaurantSlug, order.id, updatedItems, subtotal);
+  if (!ok) return null;
+  return { items: updatedItems, subtotal, delta: subtotal - order.subtotal };
 }
 
 /** Cancels a not-yet-locked order. No-ops once the edit window has closed or the order isn't "new". */
-export async function cancelSubmittedOrder(sessionId: string, orderId: string): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  const order = state.submittedOrders.find((entry) => entry.orderId === orderId);
-  if (!order?.id || !canEditOrder(order)) return state;
-
-  await updateQROrderStatus(state.restaurantSlug, orderId, "cancelled");
-  if (state.dbSessionId) {
-    await updateSessionTotal(
-      state.restaurantSlug,
-      state.dbSessionId,
-      Math.max(0, state.currentBillTotal - order.subtotal)
-    );
-  }
-
-  return saveSession({
-    ...state,
-    submittedOrders: state.submittedOrders.map((entry) =>
-      entry.orderId === orderId ? { ...entry, status: "cancelled" } : entry
-    ),
-    currentBillTotal: Math.max(0, state.currentBillTotal - order.subtotal),
-  });
+export async function cancelSubmittedOrder(restaurantSlug: string, order: QROrder): Promise<boolean> {
+  if (!order.id || !canEditOrder(order)) return false;
+  await updateQROrderStatus(restaurantSlug, order.orderId, "cancelled");
+  return true;
 }
 
-export async function requestBill(sessionId: string): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  if (!state.dbSessionId) return state;
-  await updateSessionStatus(state.restaurantSlug, state.dbSessionId, "ready_to_pay");
-  return saveSession({ ...state, orderStatus: "ready_to_pay" });
-}
-
-export async function markPaid(sessionId: string): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  if (!state.dbSessionId) return state;
-  await updateSessionStatus(state.restaurantSlug, state.dbSessionId, "paid");
-  await updateSessionPaymentStatus(state.restaurantSlug, state.dbSessionId, "paid");
-  return saveSession({ ...state, orderStatus: "paid", paymentStatus: "paid" });
-}
-
-/** Re-pulls the table's shared session/orders from Supabase — call on a timer to notice staff-driven changes (preparing, paid, etc). */
-export async function refreshSession(sessionId: string): Promise<TableSessionState> {
-  const state = requireState(sessionId);
-  const hydrated = await hydrateFromRemote(state);
-  return writeLocal(hydrated);
+export async function requestBillForSession(restaurantSlug: string, dbSessionId: string): Promise<void> {
+  await updateSessionStatus(restaurantSlug, dbSessionId, "ready_to_pay");
 }
 
 /**
  * Cross-tab local demo sync: fires when another tab/window writes this same session (e.g. a second
  * device-tab open at the same table). Deliberately only listens to the native `storage` event, which
- * browsers never fire back at the tab that made the write — callers already update their own state
- * directly after each mutation, so echoing same-tab writes here would just recurse into `writeLocal`.
+ * browsers never fire back at the tab that made the write. Callers should merge only the remote-owned
+ * fields from the freshly-read stored session — never its `cartItems` — so one tab's draft cart is
+ * never overwritten by another tab's activity.
  */
 export function subscribeToTableSession(sessionId: string, onChange: () => void): () => void {
   function handleStorage(event: StorageEvent) {
@@ -488,4 +486,4 @@ export function subscribeToParticipants(dbSessionId: string, onChange: () => voi
   };
 }
 
-export { parseSessionId };
+export { parseSessionId, writeLocalSession, debugLog };

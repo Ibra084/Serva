@@ -22,32 +22,11 @@ import {
   saveGuestPreferences,
 } from "@/lib/consumer-ai";
 import { syncGuestPreferences } from "@/lib/guest-preferences-store";
-import { markQRInteractionAccepted, saveQRInteraction, saveQRReview, subscribeToSessionOrders } from "@/lib/qr-store";
-import { subscribeToSession } from "@/lib/live-store";
-import { calculateBill, createDemoPayment, type SessionBill } from "@/lib/bill-splitting";
-import {
-  addCartItem,
-  cancelSubmittedOrder,
-  clearCart,
-  editSubmittedOrder,
-  getAnonymousGuestId,
-  getOrCreateActiveSession,
-  heartbeatParticipant,
-  joinTableSession,
-  getActiveParticipants,
-  PARTICIPANT_POLL_MS,
-  refreshSession,
-  requestBill as requestBillAction,
-  submitCartAsOrder,
-  subscribeToParticipants,
-  subscribeToTableSession,
-  updateCartItem,
-  updateParticipantName,
-  type TableSessionState,
-} from "@/lib/table-session-store";
+import { markQRInteractionAccepted, saveQRInteraction, saveQRReview } from "@/lib/qr-store";
+import { useTableSession } from "@/lib/use-table-session";
 import { unslugify } from "@/lib/utils";
 import { DEFAULT_GUEST_PREFERENCES, type GuestPreferences } from "@/lib/menu-types";
-import type { MenuItem, QRBasketItem, SplitMode, TableParticipant } from "@/lib/types";
+import type { MenuItem, QRBasketItem } from "@/lib/types";
 
 type View = "welcome" | "assistant" | "menu" | "status" | "bill" | "review" | "thanks";
 
@@ -83,19 +62,28 @@ export function QRCustomerClient({
   const [preferences, setPreferences] = useState<GuestPreferences>(DEFAULT_GUEST_PREFERENCES);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [paying, setPaying] = useState(false);
-
-  // Table-session-backed cart/order state, persisted to localStorage + Supabase and restored on reload.
-  const [tableSession, setTableSession] = useState<TableSessionState | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(Boolean(tableId));
   const [initialViewApplied, setInitialViewApplied] = useState(false);
-
-  // Multi-device participants joined to the table's shared session, and this device's own bill share.
-  const [participants, setParticipants] = useState<TableParticipant[]>([]);
-  const [selfParticipantId, setSelfParticipantId] = useState<string | null>(null);
-  const [sessionBill, setSessionBill] = useState<SessionBill | null>(null);
 
   // Fallback, non-persistent cart for the rare case of no `table` query param (nothing to scope a session by).
   const [fallbackBasket, setFallbackBasket] = useState<QRBasketItem[]>([]);
+
+  // Single source of truth for session/cart/orders/participants/bill — see `useTableSession`.
+  const {
+    session: tableSession,
+    participants,
+    selfParticipantId,
+    sessionBill,
+    loading: sessionLoading,
+    addToCart,
+    updateCartQuantity,
+    clearCart,
+    submitCart,
+    editOrderItem: editOrderItemAction,
+    cancelOrder: cancelOrderAction,
+    requestBill: requestBillAction,
+    paySplit,
+    renameSelf,
+  } = useTableSession(restaurantId, tableId);
 
   const basket = tableId ? (tableSession?.cartItems ?? []) : fallbackBasket;
   const subtotal = basket.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -108,23 +96,6 @@ export function QRCustomerClient({
     setPreferences(getGuestPreferences(restaurantId));
   }, [restaurantId]);
 
-  useEffect(() => {
-    if (!tableId) {
-      setSessionLoading(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const state = await getOrCreateActiveSession(restaurantId, tableId);
-      if (cancelled) return;
-      setTableSession(state);
-      setSessionLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId, tableId]);
-
   // Choose the customer's landing state once, on load/reload — never overrides a manual navigation afterward.
   useEffect(() => {
     if (!tableId || sessionLoading || initialViewApplied || !tableSession) return;
@@ -133,89 +104,6 @@ export function QRCustomerClient({
       setView("status");
     }
   }, [tableId, sessionLoading, initialViewApplied, tableSession, hasSubmittedOrders]);
-
-  // Reflects staff-driven changes (marking preparing/served/paid, requesting bill) onto this device.
-  useEffect(() => {
-    if (!tableSession?.dbSessionId) return;
-    const dbSessionId = tableSession.dbSessionId;
-    const sessionId = tableSession.sessionId;
-    async function refresh() {
-      setTableSession(await refreshSession(sessionId));
-    }
-    const unsubscribeOrders = subscribeToSessionOrders(dbSessionId, refresh);
-    const unsubscribeSession = subscribeToSession(dbSessionId, refresh);
-    return () => {
-      unsubscribeOrders();
-      unsubscribeSession();
-    };
-  }, [tableSession?.dbSessionId, tableSession?.sessionId]);
-
-  // Cross-tab local demo sync — a second tab/device open at the same table sees cart/order edits.
-  useEffect(() => {
-    if (!tableSession) return;
-    const sessionId = tableSession.sessionId;
-    return subscribeToTableSession(sessionId, async () => {
-      setTableSession(await refreshSession(sessionId));
-    });
-  }, [tableSession?.sessionId]);
-
-  // Registers this device as a participant of the table's shared session once it exists.
-  useEffect(() => {
-    if (!tableSession?.dbSessionId) return;
-    const dbSessionId = tableSession.dbSessionId;
-    let cancelled = false;
-    (async () => {
-      const participant = await joinTableSession(restaurantId, dbSessionId, getAnonymousGuestId());
-      if (!cancelled) setSelfParticipantId(participant?.id ?? null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId, tableSession?.dbSessionId]);
-
-  // Keeps this device "connected" and picks up other guests joining/renaming — realtime plus a 4s poll fallback.
-  useEffect(() => {
-    if (!tableSession?.dbSessionId) {
-      setParticipants([]);
-      return;
-    }
-    const dbSessionId = tableSession.dbSessionId;
-    let cancelled = false;
-
-    async function refreshParticipants() {
-      const list = await getActiveParticipants(dbSessionId);
-      if (!cancelled) setParticipants(list);
-    }
-
-    refreshParticipants();
-    const interval = setInterval(() => {
-      if (selfParticipantId) void heartbeatParticipant(selfParticipantId);
-      void refreshParticipants();
-    }, PARTICIPANT_POLL_MS);
-    const unsubscribe = subscribeToParticipants(dbSessionId, refreshParticipants);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      unsubscribe();
-    };
-  }, [tableSession?.dbSessionId, selfParticipantId]);
-
-  // Recomputes the shared bill (and how much of it other guests have already paid) as orders/payments change.
-  useEffect(() => {
-    if (!tableSession?.dbSessionId) {
-      setSessionBill(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const result = await calculateBill(tableSession);
-      if (!cancelled) setSessionBill(result);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableSession?.dbSessionId, tableSession?.submittedOrders, tableSession?.paymentStatus, participants]);
 
   useEffect(() => {
     saveQRInteraction(restaurantId, {
@@ -294,9 +182,8 @@ export function QRCustomerClient({
   }
 
   function addToBasket(item: MenuItem, quantity = 1) {
-    const basketItem: QRBasketItem = { dish: item.dish, category: item.category, price: item.price, quantity };
-    if (tableId && tableSession) {
-      setTableSession(addCartItem(tableSession.sessionId, basketItem));
+    if (tableId) {
+      addToCart(item, quantity);
       return;
     }
     setFallbackBasket((prev) => {
@@ -306,7 +193,7 @@ export function QRCustomerClient({
           entry.dish === item.dish ? { ...entry, quantity: entry.quantity + quantity } : entry
         );
       }
-      return [...prev, basketItem];
+      return [...prev, { dish: item.dish, category: item.category, price: item.price, quantity }];
     });
   }
 
@@ -317,8 +204,8 @@ export function QRCustomerClient({
   }
 
   function changeQuantity(dish: string, quantity: number) {
-    if (tableId && tableSession) {
-      setTableSession(updateCartItem(tableSession.sessionId, dish, quantity));
+    if (tableId) {
+      updateCartQuantity(dish, quantity);
       return;
     }
     setFallbackBasket((prev) => {
@@ -328,8 +215,8 @@ export function QRCustomerClient({
   }
 
   function clearBasket() {
-    if (tableId && tableSession) {
-      setTableSession(clearCart(tableSession.sessionId));
+    if (tableId) {
+      clearCart();
       return;
     }
     setFallbackBasket([]);
@@ -342,66 +229,13 @@ export function QRCustomerClient({
     );
     const aiRecommendedItems = basket.map((item) => item.dish).filter((dish) => recommendedDishSet.has(dish));
 
-    if (tableId && tableSession) {
-      const next = await submitCartAsOrder(tableSession.sessionId, {
-        specialRequests,
-        aiRecommendedItems,
-      });
-      setTableSession(next);
+    if (tableId) {
+      await submitCart({ specialRequests, aiRecommendedItems });
     }
 
     setSpecialRequests("");
     setBasketOpen(false);
     setView("status");
-  }
-
-  function editOrderItem(orderId: string, dish: string, quantity: number) {
-    if (!tableSession) return;
-    const order = tableSession.submittedOrders.find((entry) => entry.orderId === orderId);
-    if (!order) return;
-    const updatedItems =
-      quantity <= 0
-        ? order.items.filter((entry) => entry.dish !== dish)
-        : order.items.map((entry) => (entry.dish === dish ? { ...entry, quantity } : entry));
-    void editSubmittedOrder(tableSession.sessionId, orderId, updatedItems).then(setTableSession);
-  }
-
-  function cancelOrder(orderId: string) {
-    if (!tableSession) return;
-    void cancelSubmittedOrder(tableSession.sessionId, orderId).then(setTableSession);
-  }
-
-  async function requestBill() {
-    if (!tableSession) return;
-    setTableSession(await requestBillAction(tableSession.sessionId));
-  }
-
-  async function payBill(amount: number, splitMode: SplitMode) {
-    if (!tableSession?.dbSessionId || !selfParticipantId || amount <= 0) return;
-    setPaying(true);
-    await createDemoPayment({
-      restaurantSlug: restaurantId,
-      dbSessionId: tableSession.dbSessionId,
-      tableRowId: tableSession.tableRowId,
-      orderId: tableSession.submittedOrders[0]?.id ?? null,
-      participantId: selfParticipantId,
-      amount,
-      splitMode,
-    });
-    const [nextSession, nextBill] = await Promise.all([
-      refreshSession(tableSession.sessionId),
-      calculateBill(tableSession),
-    ]);
-    setTableSession(nextSession);
-    setSessionBill(nextBill);
-    setPaying(false);
-  }
-
-  async function renameSelf(name: string) {
-    if (!selfParticipantId) return;
-    const updated = await updateParticipantName(selfParticipantId, name);
-    if (!updated) return;
-    setParticipants((prev) => prev.map((participant) => (participant.id === updated.id ? updated : participant)));
   }
 
   async function submitReview(input: ReviewInput) {
@@ -419,6 +253,12 @@ export function QRCustomerClient({
       aiRecommendationHelpful: input.aiRecommendationHelpful,
     });
     setView("thanks");
+  }
+
+  async function payBill(amount: number, splitMode: Parameters<typeof paySplit>[1]) {
+    setPaying(true);
+    await paySplit(amount, splitMode);
+    setPaying(false);
   }
 
   function handleWelcomeChoice(choice: WelcomeChoice) {
@@ -558,11 +398,11 @@ export function QRCustomerClient({
           tableSession={tableSession}
           onAddMore={() => setView("menu")}
           onViewBill={() => setView("bill")}
-          onRequestBill={requestBill}
+          onRequestBill={requestBillAction}
           onPayBill={() => setView("bill")}
           onLeaveReview={() => setView("review")}
-          onEditOrderItem={editOrderItem}
-          onCancelOrder={cancelOrder}
+          onEditOrderItem={editOrderItemAction}
+          onCancelOrder={cancelOrderAction}
         />
       )}
 
