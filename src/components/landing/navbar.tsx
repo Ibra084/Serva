@@ -26,12 +26,15 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
+    const container = document.getElementById("app-scroll-container");
+
     function onScroll() {
-      setScrolled(window.scrollY > 8);
+      setScrolled((container?.scrollTop ?? window.scrollY) > 8);
     }
     onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const target: Element | Window = container ?? window;
+    target.addEventListener("scroll", onScroll, { passive: true });
+    return () => target.removeEventListener("scroll", onScroll);
   }, []);
 
   function handleNavClick(event: React.MouseEvent<HTMLAnchorElement>, href: string) {
