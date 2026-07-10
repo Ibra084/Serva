@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { calculateCustomRemaining, calculateEqualSplit } from "@/lib/table-session-store";
-import type { SplitMode } from "@/lib/types";
+import { calculateEqualSplit, validateCustomAmount, type SplitMode } from "@/lib/session-store";
 
-const MODES: { key: SplitMode; label: string }[] = [
+/** "items" is a UI-only placeholder — it's never a real `SplitMode` since payments can't attach to specific items yet. */
+const MODES: { key: SplitMode | "items"; label: string }[] = [
   { key: "equal", label: "Split equally" },
   { key: "custom", label: "Custom amount" },
   { key: "full", label: "Pay full bill" },
@@ -24,13 +24,14 @@ export function SplitBillPanel({
   paying: boolean;
   onPay: (amount: number, splitMode: SplitMode) => Promise<boolean>;
 }) {
-  const [mode, setMode] = useState<SplitMode>("equal");
+  const [mode, setMode] = useState<SplitMode | "items">("equal");
   const [customAmount, setCustomAmount] = useState("");
   const [error, setError] = useState(false);
 
   const equalShare = calculateEqualSplit(remaining, Math.max(1, connectedGuestCount));
   const customValue = Number(customAmount) || 0;
-  const { remainingAfter, valid } = calculateCustomRemaining(remaining, [customValue]);
+  const valid = customAmount.trim() !== "" && validateCustomAmount(remaining, customValue);
+  const remainingAfter = remaining - customValue;
 
   const payAmount = useMemo(() => {
     if (mode === "equal") return equalShare;
@@ -105,7 +106,8 @@ export function SplitBillPanel({
       <button
         onClick={async () => {
           setError(false);
-          const ok = await onPay(payAmount, mode);
+          // "items" mode's tile is always disabled, so `mode` is a real SplitMode whenever this fires.
+          const ok = await onPay(payAmount, mode as SplitMode);
           if (!ok) setError(true);
         }}
         disabled={paying || payAmount <= 0 || (mode === "custom" && !valid)}

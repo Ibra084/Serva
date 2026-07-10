@@ -5,22 +5,21 @@ import { LayoutGrid } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { TableCard } from "@/components/portal/live/table-card";
 import { RecentOrdersPanel } from "@/components/portal/live/recent-orders-panel";
-import { useLiveFloor } from "@/lib/use-live-data";
-import { cancelOrder } from "@/lib/live-store";
-import { closeSession, markSessionPaid, requestBillForSession, updateOrderStatus } from "@/lib/table-session-store";
+import { SessionDebugPanel } from "@/components/qr/session-debug-panel";
+import { useLiveSessions } from "@/lib/use-live-sessions";
+import { closeSession, markPaid, requestBill, updateOrderStatus } from "@/lib/session-store";
 
 export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
-  const { tables, sessions, loading, refresh } = useLiveFloor(restaurantSlug);
+  const { tables, sessions, loading, refresh } = useLiveSessions(restaurantSlug);
 
-  const summaryByTable = useMemo(() => {
+  const sessionByTableNumber = useMemo(() => {
     const map = new Map<string, (typeof sessions)[number]>();
-    for (const summary of sessions) map.set(summary.table.id, summary);
+    for (const session of sessions) map.set(session.tableId, session);
     return map;
   }, [sessions]);
 
-  const allOrders = useMemo(() => sessions.flatMap((summary) => summary.orders), [sessions]);
-
-  const occupiedCount = sessions.filter((summary) => summary.session.status !== "paid").length;
+  const allOrders = useMemo(() => sessions.flatMap((session) => session.orders), [sessions]);
+  const occupiedCount = sessions.filter((session) => session.status !== "paid").length;
 
   async function act(fn: () => Promise<void>) {
     await fn();
@@ -48,22 +47,18 @@ export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
         ) : (
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {tables.map((table) => {
-              const summary = summaryByTable.get(table.id) ?? null;
+              const session = sessionByTableNumber.get(table.tableNumber) ?? null;
               return (
                 <TableCard
                   key={table.id}
                   table={table}
-                  session={summary?.session ?? null}
-                  orders={summary?.orders ?? []}
-                  guestCount={summary?.participants.length ?? 0}
-                  amountPaid={summary?.paid ?? 0}
-                  remaining={summary?.remaining ?? 0}
-                  onMarkPreparing={(orderId) => act(() => updateOrderStatus(restaurantSlug, orderId, "preparing"))}
-                  onMarkServed={(orderId) => act(() => updateOrderStatus(restaurantSlug, orderId, "served"))}
-                  onMarkReadyToPay={(sessionId) => act(() => requestBillForSession(restaurantSlug, sessionId))}
-                  onMarkPaid={(sessionId) => act(() => markSessionPaid(restaurantSlug, sessionId))}
-                  onCloseTable={(sessionId) => act(() => closeSession(restaurantSlug, sessionId))}
-                  onCancelOrder={(orderId) => act(() => cancelOrder(restaurantSlug, orderId))}
+                  session={session}
+                  onMarkPreparing={(sessionId, orderId) => act(() => updateOrderStatus(sessionId, orderId, "preparing"))}
+                  onMarkServed={(sessionId, orderId) => act(() => updateOrderStatus(sessionId, orderId, "served"))}
+                  onMarkReadyToPay={(sessionId) => act(() => requestBill(sessionId))}
+                  onMarkPaid={(sessionId) => act(() => markPaid(sessionId))}
+                  onCloseTable={(sessionId) => act(() => closeSession(sessionId))}
+                  onCancelOrder={(sessionId, orderId) => act(() => updateOrderStatus(sessionId, orderId, "cancelled"))}
                 />
               );
             })}
@@ -74,6 +69,7 @@ export function LiveClient({ restaurantSlug }: { restaurantSlug: string }) {
           <RecentOrdersPanel orders={allOrders} loading={loading} />
         </div>
       </main>
+      <SessionDebugPanel sessions={sessions} />
     </>
   );
 }

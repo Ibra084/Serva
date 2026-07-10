@@ -281,7 +281,7 @@ export interface QRBasketItem {
   quantity: number;
 }
 
-export type QROrderStatus = "new" | "preparing" | "served" | "ready_to_pay" | "paid" | "completed" | "cancelled";
+export type QROrderStatus = "new" | "preparing" | "served" | "cancelled";
 
 export interface QROrder {
   /** Row id (uuid) — needed to link payments and to update status by primary key. */
@@ -331,7 +331,9 @@ export interface QRMetrics {
 }
 
 // ============================================================================
-// Live operations: table registry, live floor state, payments
+// Table registry. Session/order/payment/participant types and their statuses
+// live entirely in `lib/session-store.ts` — that module is the only place
+// they're defined, to rule out the "multiple incompatible shapes" class of bug.
 // ============================================================================
 
 export interface RestaurantTable {
@@ -341,73 +343,6 @@ export interface RestaurantTable {
   seats: number;
   zone: string | null;
   displayOrder: number;
-}
-
-export type LiveTableStatus =
-  | "empty"
-  | "seated"
-  | "ordering"
-  | "order_placed"
-  | "preparing"
-  | "served"
-  | "ready_to_pay"
-  | "paid"
-  /** Terminal — the only status that means "archived, no longer part of the active live view". Set exclusively by `closeSession`; "paid" alone must never imply closed. */
-  | "closed";
-
-export type LivePaymentStatus = "unpaid" | "partial" | "paid";
-
-export interface LiveTableSession {
-  id: string;
-  restaurantId: string;
-  tableId: string;
-  status: LiveTableStatus;
-  guestCount: number;
-  startedAt: string;
-  closedAt: string | null;
-  currentTotal: number;
-  paymentStatus: LivePaymentStatus;
-}
-
-export type SplitType = "full" | "equal" | "custom" | "items";
-
-/** Alias kept distinct for call sites that talk about "how the bill is split" rather than the payment row's shape. */
-export type SplitMode = SplitType;
-
-export interface Bill {
-  subtotal: number;
-  serviceCharge: number;
-  vat: number;
-  tip: number;
-  total: number;
-}
-
-export interface Payment {
-  id: string;
-  restaurantId: string;
-  tableId: string | null;
-  sessionId: string | null;
-  orderId: string | null;
-  participantId: string | null;
-  amount: number;
-  tipAmount: number;
-  method: string;
-  status: "pending" | "paid" | "failed";
-  splitType: SplitType;
-  createdAt: string;
-}
-
-/** One device/guest joined to a table's shared `LiveTableSession`. */
-export interface TableParticipant {
-  id: string;
-  sessionId: string;
-  deviceId: string;
-  displayName: string;
-  joinedAt: string;
-  lastSeenAt: string;
-  isActive: boolean;
-  amountPaid: number;
-  assignedItems?: string[];
 }
 
 export interface AssistantAnswer {

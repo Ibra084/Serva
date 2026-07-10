@@ -8,6 +8,7 @@ import { useRestaurantData } from "@/lib/use-restaurant-data";
 import { usePortalData } from "@/lib/portal-cache";
 import { clearAllUploadBatches, clearRestaurantData, loadSampleData } from "@/lib/data-store";
 import { clearDemoData } from "@/lib/workspace-store";
+import { clearAllSessionsForRestaurant } from "@/lib/session-store";
 
 export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
   const router = useRouter();
@@ -17,6 +18,8 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
   const [clearError, setClearError] = useState(false);
   const [reimporting, setReimporting] = useState(false);
   const [demoCleared, setDemoCleared] = useState(false);
+  const [sessionsCleared, setSessionsCleared] = useState(false);
+  const [clearingSessions, setClearingSessions] = useState(false);
 
   async function handleClearData() {
     setClearError(false);
@@ -44,6 +47,16 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
     setDemoCleared(true);
     if (removedSlugs.includes(restaurantSlug)) {
       router.push("/portal");
+    }
+  }
+
+  async function handleResetSessions() {
+    setClearingSessions(true);
+    try {
+      await clearAllSessionsForRestaurant(restaurantSlug);
+      setSessionsCleared(true);
+    } finally {
+      setClearingSessions(false);
     }
   }
 
@@ -160,6 +173,30 @@ export function SettingsClient({ restaurantSlug }: { restaurantSlug: string }) {
                 <CheckCircle2 className="size-4" />
                 Demo data cleared.
               </p>
+            )}
+
+            {process.env.NODE_ENV !== "production" && (
+              <div className="mt-5 border-t border-border pt-5">
+                <p className="text-sm font-medium text-foreground">Reset all QR/session data</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Deletes every table session, order, and payment for this restaurant so you can retest
+                  the QR flow from a clean slate. The table registry itself is untouched.
+                </p>
+                <button
+                  onClick={handleResetSessions}
+                  disabled={clearingSessions}
+                  className="mt-3 flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {clearingSessions ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  Reset all QR/session data
+                </button>
+                {sessionsCleared && (
+                  <p className="mt-3 flex items-center gap-1.5 text-sm text-primary">
+                    <CheckCircle2 className="size-4" />
+                    All sessions, orders, and payments cleared.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>

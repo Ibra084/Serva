@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
-import { newId, num } from "@/lib/db-utils";
-import type { QRBasketItem, QRInteraction, QROrder, QROrderStatus, QRReview } from "@/lib/types";
+import { num } from "@/lib/db-utils";
+import type { QRInteraction, QROrder, QROrderStatus, QRReview } from "@/lib/types";
 
 async function resolveRestaurantId(restaurantSlug: string): Promise<string | null> {
   const supabase = createClient();
@@ -64,45 +64,7 @@ export async function loadQRInteractions(restaurantSlug: string): Promise<QRInte
   }));
 }
 
-/** Places a QR order. Anonymous insert of the order + its line items, per public QR-flow RLS policy. Returns the row id (uuid). */
-export async function saveQROrder(restaurantSlug: string, order: QROrder): Promise<string | null> {
-  const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return null;
-
-  // Generates the primary key client-side and inserts it explicitly, rather than reading it
-  // back via `.select()` — matches the row id we already know without a round trip.
-  const orderRowId = newId();
-  const supabase = createClient();
-  const { error } = await supabase.from("qr_orders").insert({
-    id: orderRowId,
-    restaurant_id: restaurantId,
-    order_id: order.orderId,
-    table_id: order.tableId,
-    session_id: order.sessionId ?? null,
-    subtotal: order.subtotal,
-    ai_recommended_items: order.aiRecommendedItems,
-    special_requests: order.specialRequests,
-    status: order.status,
-    created_at: order.timestamp,
-  });
-  if (error) return null;
-
-  if (order.items.length > 0) {
-    await supabase.from("qr_order_items").insert(
-      order.items.map((item) => ({
-        qr_order_id: orderRowId,
-        dish: item.dish,
-        category: item.category,
-        price: item.price,
-        quantity: item.quantity,
-      }))
-    );
-  }
-
-  return orderRowId;
-}
-
-/** Owner-portal read — restricted to restaurant members by RLS. */
+/** Owner-portal read — restricted to restaurant members by RLS. Flat, all-time order history for analytics (QR insights); live/session-scoped order reads live in `session-store.ts`. */
 export async function loadQROrders(restaurantSlug: string): Promise<QROrder[]> {
   const restaurantId = await resolveRestaurantId(restaurantSlug);
   if (!restaurantId) return [];
@@ -133,114 +95,6 @@ export async function loadQROrders(restaurantSlug: string): Promise<QROrder[]> {
       quantity: num(item.quantity),
     })),
   }));
-}
-
-/** Anonymous-safe read of every order for one session (customer's own bill), newest first. */
-export async function loadSessionOrders(restaurantSlug: string, sessionId: string): Promise<QROrder[]> {
-  const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return [];
-
-  const supabase = createClient();
-  const { data } = await supabase
-    .from("qr_orders")
-    .select("*, qr_order_items(*)")
-    .eq("restaurant_id", restaurantId)
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: false });
-
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    orderId: row.order_id,
-    restaurantId: restaurantSlug,
-    tableId: row.table_id,
-    sessionId: row.session_id ?? null,
-    timestamp: row.created_at,
-    subtotal: num(row.subtotal),
-    source: "qr" as const,
-    aiRecommendedItems: (row.ai_recommended_items as string[] | null) ?? [],
-    specialRequests: row.special_requests ?? "",
-    status: row.status as QROrderStatus,
-    items: ((row.qr_order_items ?? []) as Record<string, unknown>[]).map((item) => ({
-      dish: item.dish as string,
-      category: item.category as string,
-      price: num(item.price),
-      quantity: num(item.quantity),
-    })),
-  }));
-}
-
-/** Subscribes to realtime changes on one session's orders (customer-side status screen). Returns an unsubscribe fn. */
-export function subscribeToSessionOrders(sessionId: string, onChange: () => void): () => void {
-  const supabase = createClient();
-  const channel = supabase
-    .channel(`session-orders-${sessionId}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "qr_orders", filter: `session_id=eq.${sessionId}` },
-      onChange
-    )
-    .on("postgres_changes", { event: "*", schema: "public", table: "qr_order_items" }, onChange)
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}
-
-/**
- * Replaces an order's line items and subtotal in place — used during the customer's short post-submit
- * edit window. Anonymous-safe, per the same public-write trust model as the rest of the QR flow.
- */
-export async function updateQROrderItems(
-  restaurantSlug: string,
-  orderRowId: string,
-  items: QRBasketItem[],
-  subtotal: number
-): Promise<boolean> {
-  const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return false;
-
-  const supabase = createClient();
-  const { error: deleteError } = await supabase.from("qr_order_items").delete().eq("qr_order_id", orderRowId);
-  if (deleteError) return false;
-
-  if (items.length > 0) {
-    const { error: insertError } = await supabase.from("qr_order_items").insert(
-      items.map((item) => ({
-        qr_order_id: orderRowId,
-        dish: item.dish,
-        category: item.category,
-        price: item.price,
-        quantity: item.quantity,
-      }))
-    );
-    if (insertError) return false;
-  }
-
-  const { error: updateError } = await supabase
-    .from("qr_orders")
-    .update({ subtotal })
-    .eq("id", orderRowId)
-    .eq("restaurant_id", restaurantId);
-
-  return !updateError;
-}
-
-/** Owner-only status update (e.g. marking an order completed), restricted to restaurant members by RLS. */
-export async function updateQROrderStatus(
-  restaurantSlug: string,
-  orderId: string,
-  status: QROrderStatus
-): Promise<void> {
-  const restaurantId = await resolveRestaurantId(restaurantSlug);
-  if (!restaurantId) return;
-
-  const supabase = createClient();
-  await supabase
-    .from("qr_orders")
-    .update({ status })
-    .eq("restaurant_id", restaurantId)
-    .eq("order_id", orderId);
 }
 
 /** Submits a QR review. Anonymous insert, per public QR-flow RLS policy. */

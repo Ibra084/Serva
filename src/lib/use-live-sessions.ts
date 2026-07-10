@@ -1,16 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadTables, subscribeToLiveFloor } from "@/lib/live-store";
-import { loadActiveSessionsForRestaurant, type ActiveSessionSummary } from "@/lib/table-session-store";
+import {
+  getLiveSessionsForRestaurant,
+  loadTables,
+  subscribeToRestaurantRealtime,
+  subscribeToSessionsChanged,
+  type TableSession,
+} from "@/lib/session-store";
 import type { RestaurantTable } from "@/lib/types";
 
 const POLL_MS = 15_000;
 
-/** Live restaurant floor: the full table registry, plus every active session (with its own orders/participants/payments/bill), kept fresh via Supabase Realtime with a polling fallback. */
-export function useLiveFloor(restaurantSlug: string) {
+/** Owner live view's single data source: the full table registry, plus every non-closed session (already bundled with its own orders/payments/participants/bill). */
+export function useLiveSessions(restaurantSlug: string) {
   const [tables, setTables] = useState<RestaurantTable[]>([]);
-  const [sessions, setSessions] = useState<ActiveSessionSummary[]>([]);
+  const [sessions, setSessions] = useState<TableSession[]>([]);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(false);
 
@@ -19,7 +24,7 @@ export function useLiveFloor(restaurantSlug: string) {
     loadingRef.current = true;
     const [nextTables, nextSessions] = await Promise.all([
       loadTables(restaurantSlug),
-      loadActiveSessionsForRestaurant(restaurantSlug),
+      getLiveSessionsForRestaurant(restaurantSlug),
     ]);
     setTables(nextTables);
     setSessions(nextSessions);
@@ -29,10 +34,12 @@ export function useLiveFloor(restaurantSlug: string) {
 
   useEffect(() => {
     refresh();
-    const unsubscribe = subscribeToLiveFloor(restaurantSlug, refresh);
+    const unsubscribeRealtime = subscribeToRestaurantRealtime(restaurantSlug, refresh);
+    const unsubscribeSync = subscribeToSessionsChanged(refresh);
     const interval = setInterval(refresh, POLL_MS);
     return () => {
-      unsubscribe();
+      unsubscribeRealtime();
+      unsubscribeSync();
       clearInterval(interval);
     };
   }, [restaurantSlug, refresh]);

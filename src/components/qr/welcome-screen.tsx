@@ -1,23 +1,36 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sparkles, UtensilsCrossed, ReceiptText, ShoppingBag } from "lucide-react";
+import { CheckCircle2, PartyPopper, ReceiptText, Sparkles, ShoppingBag, UtensilsCrossed } from "lucide-react";
 import { GuestStrip } from "@/components/qr/guest-strip";
-import type { TableParticipant } from "@/lib/types";
+import type { SessionParticipant, TableSession } from "@/lib/session-store";
 
-const CHOICES = [
-  { key: "browse", label: "See Menu", icon: UtensilsCrossed },
-  { key: "choose", label: "Ask AI", icon: Sparkles },
-  { key: "bill", label: "View Bill", icon: ReceiptText },
-  { key: "startOrder", label: "Start Order", icon: ShoppingBag },
-] as const;
+export type WelcomeChoice = "browse" | "choose" | "bill" | "startOrder" | "receipt" | "startNewVisit";
 
-export type WelcomeChoice = (typeof CHOICES)[number]["key"];
+interface Choice {
+  key: WelcomeChoice;
+  label: string;
+  icon: React.ElementType;
+}
+
+const MENU: Choice = { key: "browse", label: "See Menu", icon: UtensilsCrossed };
+const AI: Choice = { key: "choose", label: "Ask AI", icon: Sparkles };
+const START_ORDER: Choice = { key: "startOrder", label: "Start Order", icon: ShoppingBag };
+const VIEW_BILL: Choice = { key: "bill", label: "View Bill", icon: ReceiptText };
+const VIEW_RECEIPT: Choice = { key: "receipt", label: "View Receipt", icon: ReceiptText };
+const START_NEW_VISIT: Choice = { key: "startNewVisit", label: "Start New Visit", icon: PartyPopper };
+
+function choicesForSession(session: TableSession | null): Choice[] {
+  if (!session || session.status === "closed") return [START_NEW_VISIT];
+  if (session.status === "paid") return [VIEW_RECEIPT, START_NEW_VISIT];
+  const hasOrders = session.orders.some((order) => order.status !== "cancelled");
+  return hasOrders ? [MENU, AI, VIEW_BILL] : [MENU, AI, START_ORDER];
+}
 
 export function WelcomeScreen({
   restaurantName,
   tableId,
-  hasActiveSession,
+  session,
   participants = [],
   selfParticipantId = null,
   onRename,
@@ -25,16 +38,15 @@ export function WelcomeScreen({
 }: {
   restaurantName: string;
   tableId: string | null;
-  hasActiveSession: boolean;
-  participants?: TableParticipant[];
+  session: TableSession | null;
+  participants?: SessionParticipant[];
   selfParticipantId?: string | null;
   onRename?: (name: string) => void;
   onChoose: (choice: WelcomeChoice) => void;
 }) {
-  // Exactly three primary actions: menu + AI are always present, the third depends on whether a bill exists yet.
-  const choices = CHOICES.filter((choice) =>
-    hasActiveSession ? choice.key !== "startOrder" : choice.key !== "bill"
-  );
+  const choices = choicesForSession(session);
+  const isPaid = session?.status === "paid";
+  const isClosed = !session || session.status === "closed";
 
   return (
     <div className="hero-wash flex flex-1 flex-col items-center justify-center px-5 py-10 text-center">
@@ -44,7 +56,7 @@ export function WelcomeScreen({
         transition={{ duration: 0.35, ease: "easeOut" }}
         className="flex size-16 items-center justify-center rounded-full bg-accent text-accent-foreground"
       >
-        <UtensilsCrossed className="size-7" />
+        {isPaid ? <CheckCircle2 className="size-7" /> : <UtensilsCrossed className="size-7" />}
       </motion.span>
       <motion.h1
         initial={{ y: 8, opacity: 0 }}
@@ -52,7 +64,7 @@ export function WelcomeScreen({
         transition={{ duration: 0.35, delay: 0.05, ease: "easeOut" }}
         className="mt-5 font-serif text-2xl font-medium tracking-tight text-foreground"
       >
-        Welcome to {restaurantName}
+        {isPaid ? "Payment received" : `Welcome to ${restaurantName}`}
       </motion.h1>
       {tableId && (
         <span className="mt-2 inline-block rounded-full bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -60,16 +72,20 @@ export function WelcomeScreen({
         </span>
       )}
       <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted-foreground">
-        Good to have you. What can we help you with today?
+        {isPaid
+          ? "Thank you for dining with us."
+          : isClosed
+            ? "Ready to start a new visit at this table?"
+            : "Good to have you. What can we help you with today?"}
       </p>
 
-      {participants.length > 0 && onRename && (
+      {!isClosed && participants.length > 0 && onRename && (
         <div className="mt-4 w-full max-w-sm">
           <GuestStrip participants={participants} selfParticipantId={selfParticipantId} onRename={onRename} />
         </div>
       )}
 
-      <div className="mt-7 grid w-full max-w-sm grid-cols-3 gap-3">
+      <div className="mt-7 grid w-full max-w-sm gap-3" style={{ gridTemplateColumns: `repeat(${choices.length}, minmax(0, 1fr))` }}>
         {choices.map((choice, index) => (
           <motion.button
             key={choice.key}

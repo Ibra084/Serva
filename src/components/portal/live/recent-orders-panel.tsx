@@ -2,20 +2,17 @@
 
 import { ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { QROrder } from "@/lib/types";
+import type { SessionOrder } from "@/lib/session-store";
 
-const STATUS_STYLE: Record<string, string> = {
+const STATUS_STYLE: Record<SessionOrder["status"], string> = {
   new: "bg-secondary text-muted-foreground",
   preparing: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  served: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
-  ready_to_pay: "bg-primary/15 text-primary",
-  paid: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  completed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  served: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   cancelled: "bg-destructive/10 text-destructive",
 };
 
-export function RecentOrdersPanel({ orders, loading }: { orders: QROrder[]; loading: boolean }) {
-  const recent = [...orders].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).slice(0, 10);
+export function RecentOrdersPanel({ orders, loading }: { orders: SessionOrder[]; loading: boolean }) {
+  const recent = [...orders].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 10);
 
   return (
     <div>
@@ -34,9 +31,9 @@ export function RecentOrdersPanel({ orders, loading }: { orders: QROrder[]; load
       ) : (
         <div className="mt-3 flex flex-col divide-y divide-border rounded-2xl border border-border bg-card">
           {recent.map((order) => (
-            <div key={order.id ?? order.orderId} className="flex items-center justify-between gap-3 px-4 py-3">
+            <div key={order.orderId} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">{order.tableId ?? "—"}</p>
+                <p className="text-sm font-medium text-foreground">{order.tableId || "—"}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {order.items.map((item) => `${item.quantity}× ${item.dish}`).join(", ")}
                 </p>
@@ -44,7 +41,7 @@ export function RecentOrdersPanel({ orders, loading }: { orders: QROrder[]; load
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <span className="text-sm font-medium text-foreground">AED {order.subtotal.toLocaleString()}</span>
                 <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-medium", STATUS_STYLE[order.status])}>
-                  {order.status.replace("_", " ")}
+                  {order.status}
                 </span>
               </div>
             </div>

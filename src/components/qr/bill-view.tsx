@@ -1,41 +1,34 @@
 "use client";
 
 import { ChevronLeft } from "lucide-react";
-import { SERVICE_CHARGE_PCT, VAT_PCT } from "@/lib/payment-store";
+import { SERVICE_CHARGE_PCT, VAT_PCT } from "@/lib/session-store";
 import { GuestStrip } from "@/components/qr/guest-strip";
 import { SplitBillPanel } from "@/components/qr/split-bill-panel";
-import { isParticipantConnected, type SessionBill, type TableSessionState } from "@/lib/table-session-store";
-import type { SplitMode, TableParticipant } from "@/lib/types";
+import type { Bill, SessionParticipant, SplitMode, TableSession } from "@/lib/session-store";
 
 export function BillView({
   tableSession,
-  sessionBill,
+  bill,
   participants,
+  connectedUnpaidCount,
   selfParticipantId,
   paying,
   onBack,
   onRename,
   onPaySplit,
 }: {
-  tableSession: TableSessionState;
-  sessionBill: SessionBill | null;
-  participants: TableParticipant[];
+  tableSession: TableSession;
+  bill: Bill;
+  participants: SessionParticipant[];
+  connectedUnpaidCount: number;
   selfParticipantId: string | null;
   paying: boolean;
   onBack: () => void;
   onRename: (name: string) => void;
   onPaySplit: (amount: number, splitMode: SplitMode) => Promise<boolean>;
 }) {
-  const orders = tableSession.submittedOrders.filter((order) => order.status !== "cancelled");
-  const bill = sessionBill?.bill ?? { subtotal: 0, serviceCharge: 0, vat: 0, tip: 0, total: 0 };
-  const paid = sessionBill?.paid ?? 0;
-  const remaining = sessionBill?.remaining ?? bill.total;
-  const isPaid = tableSession.paymentStatus === "paid";
-  // Equal split only asks guests who are still here and haven't already paid anything — matching how
-  // the remaining balance keeps getting re-divided among the people actually still settling up.
-  const unpaidConnectedCount =
-    participants.filter((participant) => isParticipantConnected(participant) && participant.amountPaid <= 0).length ||
-    1;
+  const orders = tableSession.orders.filter((order) => order.status !== "cancelled");
+  const isPaid = tableSession.status === "paid";
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
@@ -63,7 +56,7 @@ export function BillView({
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-foreground">Order {orders.length - index}</p>
                 <p className="text-xs text-muted-foreground">
-                  {new Date(order.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
               <div className="mt-2 flex flex-col divide-y divide-border">
@@ -106,22 +99,24 @@ export function BillView({
         </div>
         <div className="mt-1 flex items-center justify-between text-muted-foreground">
           <span>Paid</span>
-          <span className="text-foreground">AED {paid.toLocaleString()}</span>
+          <span className="text-foreground">AED {bill.amountPaid.toLocaleString()}</span>
         </div>
         <div className="flex items-center justify-between text-muted-foreground">
           <span>Remaining</span>
-          <span className="font-medium text-foreground">AED {remaining.toLocaleString()}</span>
+          <span className="font-medium text-foreground">AED {bill.remaining.toLocaleString()}</span>
         </div>
         <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
           <span>Payment status</span>
-          <span className="font-medium text-foreground">{isPaid ? "Paid" : paid > 0 ? "Partially paid" : "Unpaid"}</span>
+          <span className="font-medium text-foreground">
+            {isPaid ? "Paid" : bill.amountPaid > 0 ? "Partially paid" : "Unpaid"}
+          </span>
         </div>
       </div>
 
       {!isPaid && orders.length > 0 && (
         <SplitBillPanel
-          remaining={remaining}
-          connectedGuestCount={unpaidConnectedCount}
+          remaining={bill.remaining}
+          connectedGuestCount={connectedUnpaidCount}
           paying={paying}
           onPay={onPaySplit}
         />

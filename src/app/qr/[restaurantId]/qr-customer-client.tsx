@@ -11,6 +11,7 @@ import { GuestPreferencesSheet } from "@/components/qr/guest-preferences-sheet";
 import { BasketBar, BasketSheet } from "@/components/qr/basket-sheet";
 import { OrderStatusPanel } from "@/components/qr/order-status-panel";
 import { BillView } from "@/components/qr/bill-view";
+import { SessionDebugPanel } from "@/components/qr/session-debug-panel";
 import { ReviewFlow, type ReviewInput } from "@/components/qr/review-flow";
 import { useQRMenu } from "@/lib/use-restaurant-data";
 import {
@@ -23,7 +24,7 @@ import {
 } from "@/lib/consumer-ai";
 import { syncGuestPreferences } from "@/lib/guest-preferences-store";
 import { markQRInteractionAccepted, saveQRInteraction, saveQRReview } from "@/lib/qr-store";
-import { useTableSession } from "@/lib/use-table-session";
+import { useSession } from "@/lib/use-session";
 import { unslugify } from "@/lib/utils";
 import { DEFAULT_GUEST_PREFERENCES, type GuestPreferences } from "@/lib/menu-types";
 import type { MenuItem, QRBasketItem } from "@/lib/types";
@@ -67,43 +68,43 @@ export function QRCustomerClient({
   // Fallback, non-persistent cart for the rare case of no `table` query param (nothing to scope a session by).
   const [fallbackBasket, setFallbackBasket] = useState<QRBasketItem[]>([]);
 
-  // Single source of truth for session/cart/orders/participants/bill — see `useTableSession`.
+  // Single source of truth for session/cart/orders/participants/bill — see `useSession`.
   const {
-    session: tableSession,
-    participants,
+    session,
+    cart,
+    bill,
     selfParticipantId,
-    sessionBill,
+    connectedUnpaidParticipantCount,
     loading: sessionLoading,
     addToCart,
     updateCartQuantity,
     clearCart,
     submitCart,
-    editOrderItem: editOrderItemAction,
-    cancelOrder: cancelOrderAction,
-    requestBill: requestBillAction,
+    requestBillAction,
     paySplit,
     renameSelf,
-  } = useTableSession(restaurantId, tableId);
+    startNewVisitAction,
+  } = useSession(restaurantId, tableId);
 
-  const basket = tableId ? (tableSession?.cartItems ?? []) : fallbackBasket;
+  const basket = tableId ? cart : fallbackBasket;
   const subtotal = basket.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = basket.reduce((sum, item) => sum + item.quantity, 0);
-  const hasSubmittedOrders = Boolean(
-    tableSession?.submittedOrders.some((order) => order.status !== "cancelled")
-  );
 
   useEffect(() => {
     setPreferences(getGuestPreferences(restaurantId));
   }, [restaurantId]);
 
-  // Choose the customer's landing state once, on load/reload — never overrides a manual navigation afterward.
+  // Choose the customer's landing state once, on load/reload — never overrides a manual navigation
+  // afterward. Paid/closed sessions deliberately stay on "welcome", which itself renders the right
+  // "Payment received" / "Start New Visit" tiles for that status.
   useEffect(() => {
-    if (!tableId || sessionLoading || initialViewApplied || !tableSession) return;
+    if (!tableId || sessionLoading || initialViewApplied || !session) return;
     setInitialViewApplied(true);
-    if (tableSession.paymentStatus === "paid" || hasSubmittedOrders) {
+    const hasOrders = session.orders.some((order) => order.status !== "cancelled");
+    if (hasOrders && session.status !== "paid" && session.status !== "closed") {
       setView("status");
     }
-  }, [tableId, sessionLoading, initialViewApplied, tableSession, hasSubmittedOrders]);
+  }, [tableId, sessionLoading, initialViewApplied, session]);
 
   useEffect(() => {
     saveQRInteraction(restaurantId, {
@@ -243,7 +244,7 @@ export function QRCustomerClient({
       id: newId(),
       restaurantId,
       tableId,
-      orderId: tableSession?.submittedOrders[0]?.orderId ?? null,
+      orderId: session?.orders[0]?.orderId ?? null,
       timestamp: new Date().toISOString(),
       foodRating: input.foodRating,
       serviceRating: input.serviceRating,
@@ -262,6 +263,16 @@ export function QRCustomerClient({
     return ok;
   }
 
+  async function handleStartNewVisit() {
+    await startNewVisitAction();
+    setMessages([
+      { id: "intro", role: "assistant", text: "Hi! Ask me about spice level, dietary needs, budget, or what pairs well with a dish." },
+    ]);
+    setSpecialRequests("");
+    setInitialViewApplied(true);
+    setView("welcome");
+  }
+
   function handleWelcomeChoice(choice: WelcomeChoice) {
     if (choice === "browse" || choice === "startOrder") {
       setView("menu");
@@ -271,8 +282,12 @@ export function QRCustomerClient({
       setView("assistant");
       return;
     }
-    if (choice === "bill") {
+    if (choice === "bill" || choice === "receipt") {
       setView("bill");
+      return;
+    }
+    if (choice === "startNewVisit") {
+      void handleStartNewVisit();
     }
   }
 
@@ -360,8 +375,8 @@ export function QRCustomerClient({
           <WelcomeScreen
             restaurantName={restaurantName}
             tableId={tableId}
-            hasActiveSession={hasSubmittedOrders}
-            participants={participants}
+            session={session}
+            participants={session?.participants ?? []}
             selfParticipantId={selfParticipantId}
             onRename={renameSelf}
             onChoose={handleWelcomeChoice}
@@ -394,24 +409,23 @@ export function QRCustomerClient({
           />
         ))}
 
-      {view === "status" && tableSession && (
+      {view === "status" && session && (
         <OrderStatusPanel
-          tableSession={tableSession}
+          tableSession={session}
           onAddMore={() => setView("menu")}
           onViewBill={() => setView("bill")}
           onRequestBill={requestBillAction}
           onPayBill={() => setView("bill")}
           onLeaveReview={() => setView("review")}
-          onEditOrderItem={editOrderItemAction}
-          onCancelOrder={cancelOrderAction}
         />
       )}
 
-      {view === "bill" && tableSession && (
+      {view === "bill" && session && bill && (
         <BillView
-          tableSession={tableSession}
-          sessionBill={sessionBill}
-          participants={participants}
+          tableSession={session}
+          bill={bill}
+          participants={session.participants}
+          connectedUnpaidCount={connectedUnpaidParticipantCount}
           selfParticipantId={selfParticipantId}
           paying={paying}
           onBack={() => setView("status")}
@@ -469,6 +483,7 @@ export function QRCustomerClient({
         onSave={savePreferences}
       />
 
+      <SessionDebugPanel session={session} />
     </div>
   );
 }

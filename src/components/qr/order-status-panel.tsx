@@ -1,29 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, ChefHat, Clock, Minus, Plus, ReceiptText, Star, Trash2, Utensils, X } from "lucide-react";
+import { CheckCircle2, ChefHat, ReceiptText, Star, Utensils } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { canEditOrder, editWindowRemainingMs } from "@/lib/table-session-store";
-import type { TableSessionState } from "@/lib/table-session-store";
-import type { LiveTableStatus } from "@/lib/types";
+import type { TableSession } from "@/lib/session-store";
 
-const STATUS_STEPS: { key: LiveTableStatus; label: string; icon: React.ElementType }[] = [
-  { key: "order_placed", label: "Order placed", icon: ReceiptText },
+const STATUS_STEPS = [
+  { key: "placed", label: "Order placed", icon: ReceiptText },
   { key: "preparing", label: "Preparing", icon: ChefHat },
   { key: "served", label: "Served", icon: Utensils },
-  { key: "ready_to_pay", label: "Ready to pay", icon: CheckCircle2 },
-];
+  { key: "billed", label: "Ready to pay", icon: CheckCircle2 },
+] as const;
 
-function stepIndex(status: LiveTableStatus): number {
-  const index = STATUS_STEPS.findIndex((step) => step.key === status);
-  return index === -1 ? 0 : index;
-}
-
-function formatCountdown(ms: number): string {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+/** Derives overall progress from the furthest-along active order, plus whether the bill's been requested. */
+function currentStepIndex(session: TableSession): number {
+  const activeOrders = session.orders.filter((order) => order.status !== "cancelled");
+  if (session.status !== "active") return 3;
+  if (activeOrders.some((order) => order.status === "served")) return 2;
+  if (activeOrders.some((order) => order.status === "preparing")) return 1;
+  return 0;
 }
 
 export function OrderStatusPanel({
@@ -33,35 +27,20 @@ export function OrderStatusPanel({
   onRequestBill,
   onPayBill,
   onLeaveReview,
-  onEditOrderItem,
-  onCancelOrder,
 }: {
-  tableSession: TableSessionState;
+  tableSession: TableSession;
   onAddMore: () => void;
   onViewBill: () => void;
   onRequestBill: () => void;
   onPayBill: () => void;
   onLeaveReview: () => void;
-  onEditOrderItem: (orderId: string, dish: string, quantity: number) => void;
-  onCancelOrder: (orderId: string) => void;
 }) {
-  const [, setTick] = useState(0);
-  const orders = tableSession.submittedOrders;
-  const hasEditableOrder = orders.some((order) => canEditOrder(order));
-
-  useEffect(() => {
-    if (!hasEditableOrder) return;
-    const interval = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(interval);
-  }, [hasEditableOrder]);
-
-  const activeOrders = orders.filter((order) => order.status !== "cancelled");
+  const activeOrders = tableSession.orders.filter((order) => order.status !== "cancelled");
   const activeItems = activeOrders.flatMap((order) => order.items);
   const subtotal = activeItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const status = tableSession.orderStatus === "none" ? "order_placed" : tableSession.orderStatus;
-  const currentStep = Math.min(stepIndex(status), STATUS_STEPS.length - 1);
-  const isPaid = status === "paid";
-  const billRequested = status === "ready_to_pay";
+  const currentStep = currentStepIndex(tableSession);
+  const isPaid = tableSession.status === "paid";
+  const billRequested = tableSession.status === "bill_requested" || tableSession.status === "partially_paid";
 
   if (isPaid) {
     return (
@@ -119,66 +98,28 @@ export function OrderStatusPanel({
       )}
 
       <div className="flex flex-col gap-4">
-        {activeOrders.map((order, orderIndex) => {
-          const editable = canEditOrder(order);
-          const remaining = editWindowRemainingMs(order);
-          return (
-            <div key={order.orderId} className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-foreground">
-                  Order {activeOrders.length - orderIndex}
-                </p>
-                {editable ? (
-                  <span className="flex items-center gap-1 text-xs font-medium text-primary">
-                    <Clock className="size-3" />
-                    You can edit this order for {formatCountdown(remaining)}
-                  </span>
-                ) : (
-                  <span className="text-xs font-medium text-muted-foreground">Order sent to kitchen</span>
-                )}
-              </div>
-              <div className="mt-2 flex flex-col divide-y divide-border">
-                {order.items.map((item) => (
-                  <div key={`${order.orderId}-${item.dish}`} className="flex items-center justify-between gap-3 py-2 text-sm">
-                    <span className="text-foreground">{item.dish}</span>
-                    {editable ? (
-                      <div className="flex shrink-0 items-center gap-2 rounded-full border border-border px-1 py-1">
-                        <button
-                          onClick={() => onEditOrderItem(order.orderId, item.dish, item.quantity - 1)}
-                          aria-label="Decrease quantity"
-                          className="flex size-6 items-center justify-center rounded-full text-foreground hover:bg-secondary"
-                        >
-                          {item.quantity === 1 ? <Trash2 className="size-3" /> : <Minus className="size-3" />}
-                        </button>
-                        <span className="w-4 text-center text-sm font-medium text-foreground">{item.quantity}</span>
-                        <button
-                          onClick={() => onEditOrderItem(order.orderId, item.dish, item.quantity + 1)}
-                          aria-label="Increase quantity"
-                          className="flex size-6 items-center justify-center rounded-full text-foreground hover:bg-secondary"
-                        >
-                          <Plus className="size-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {item.quantity}× AED {(item.price * item.quantity).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {editable && (
-                <button
-                  onClick={() => onCancelOrder(order.orderId)}
-                  className="mt-3 flex items-center gap-1.5 text-xs font-medium text-destructive hover:underline"
-                >
-                  <X className="size-3.5" />
-                  Cancel order
-                </button>
-              )}
+        {activeOrders.map((order, orderIndex) => (
+          <div key={order.orderId} className="rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-foreground">Order {activeOrders.length - orderIndex}</p>
+              <span className="text-xs font-medium text-muted-foreground">
+                {order.status === "new" && "Order sent to kitchen"}
+                {order.status === "preparing" && "Preparing"}
+                {order.status === "served" && "Served"}
+              </span>
             </div>
-          );
-        })}
+            <div className="mt-2 flex flex-col divide-y divide-border">
+              {order.items.map((item) => (
+                <div key={`${order.orderId}-${item.dish}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="text-foreground">{item.dish}</span>
+                  <span className="text-muted-foreground">
+                    {item.quantity}× AED {(item.price * item.quantity).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {activeItems.length > 0 && (
@@ -201,7 +142,7 @@ export function OrderStatusPanel({
           onClick={onAddMore}
           className="flex items-center justify-center gap-1.5 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
         >
-          <Plus className="size-4" />
+          <Utensils className="size-4" />
           Add more items
         </button>
         <button
@@ -211,7 +152,7 @@ export function OrderStatusPanel({
           <ReceiptText className="size-4" />
           View bill
         </button>
-        {!billRequested ? (
+        {tableSession.status === "active" ? (
           <button
             onClick={onRequestBill}
             className="flex items-center justify-center gap-1.5 rounded-full border border-border bg-card px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"

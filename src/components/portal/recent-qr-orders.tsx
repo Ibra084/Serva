@@ -2,7 +2,7 @@
 
 import { CheckCircle2, ReceiptText } from "lucide-react";
 import { useQRData } from "@/lib/use-qr-data";
-import { updateQROrderStatus } from "@/lib/qr-store";
+import { updateOrderStatus } from "@/lib/session-store";
 import { cn } from "@/lib/utils";
 
 export function RecentQrOrders({ restaurantSlug }: { restaurantSlug: string }) {
@@ -52,8 +52,8 @@ export function RecentQrOrders({ restaurantSlug }: { restaurantSlug: string }) {
                     <span
                       className={cn(
                         "inline-block rounded-md px-2 py-0.5 text-xs font-medium",
-                        order.status === "completed" && "bg-accent text-accent-foreground",
-                        order.status === "new" && "bg-secondary text-muted-foreground",
+                        order.status === "served" && "bg-accent text-accent-foreground",
+                        (order.status === "new" || order.status === "preparing") && "bg-secondary text-muted-foreground",
                         order.status === "cancelled" && "bg-destructive/10 text-destructive"
                       )}
                     >
@@ -61,16 +61,16 @@ export function RecentQrOrders({ restaurantSlug }: { restaurantSlug: string }) {
                     </span>
                   </td>
                   <td className="px-5 py-3">
-                    {order.status === "new" && (
+                    {(order.status === "new" || order.status === "preparing") && order.sessionId && (
                       <button
                         onClick={() => {
-                          updateQROrderStatus(restaurantSlug, order.orderId, "completed");
+                          void updateOrderStatus(order.sessionId!, order.orderId, "served");
                           refresh();
                         }}
                         className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                       >
                         <CheckCircle2 className="size-3.5" />
-                        Mark complete
+                        Mark served
                       </button>
                     )}
                   </td>

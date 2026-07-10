@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { Pencil, Users } from "lucide-react";
-import { isParticipantConnected } from "@/lib/table-session-store";
-import type { TableParticipant } from "@/lib/types";
+import { isParticipantConnected, type SessionParticipant } from "@/lib/session-store";
 
 /** Shows how many devices/guests are currently connected at this table, and lets the current device rename itself. */
 export function GuestStrip({
@@ -11,7 +10,7 @@ export function GuestStrip({
   selfParticipantId,
   onRename,
 }: {
-  participants: TableParticipant[];
+  participants: SessionParticipant[];
   selfParticipantId: string | null;
   onRename: (name: string) => void;
 }) {
