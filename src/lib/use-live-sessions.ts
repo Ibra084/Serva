@@ -12,8 +12,9 @@ import type { RestaurantTable } from "@/lib/types";
 
 const POLL_MS = 15_000;
 
-/** Owner live view's single data source: the full table registry, plus every non-closed session (already bundled with its own orders/payments/participants/bill). */
-export function useLiveSessions(restaurantSlug: string) {
+/** Owner live view's single data source: the full table registry, plus every non-closed session (already bundled with its own orders/payments/participants/bill). Pass `enabled: false` to skip fetching/polling/subscriptions until needed (e.g. a lazily-opened panel). */
+export function useLiveSessions(restaurantSlug: string, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [sessions, setSessions] = useState<TableSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +34,7 @@ export function useLiveSessions(restaurantSlug: string) {
   }, [restaurantSlug]);
 
   useEffect(() => {
+    if (!enabled) return;
     refresh();
     const unsubscribeRealtime = subscribeToRestaurantRealtime(restaurantSlug, refresh);
     const unsubscribeSync = subscribeToSessionsChanged(refresh);
@@ -42,7 +44,7 @@ export function useLiveSessions(restaurantSlug: string) {
       unsubscribeSync();
       clearInterval(interval);
     };
-  }, [restaurantSlug, refresh]);
+  }, [restaurantSlug, refresh, enabled]);
 
   return { tables, sessions, loading, refresh };
 }

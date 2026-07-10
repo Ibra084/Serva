@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Search, Sparkles, EyeOff, Bell, LogOut, User as UserIcon } from "lucide-react";
+import { Sparkles, EyeOff, Bell, LogOut, User as UserIcon } from "lucide-react";
 import { logout as logoutWorkspace } from "@/lib/workspace-store";
 import { useWorkspace } from "@/lib/use-workspace";
 import { AIBriefTrigger } from "@/components/portal/ai-brief-trigger";
+import { CommandPalette } from "@/components/portal/command-palette";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,13 +35,7 @@ export function PortalTopbar({ restaurantSlug }: { restaurantSlug: string }) {
 
   return (
     <header className="flex items-center gap-4 bg-card px-6 py-4 sm:px-8">
-      <div className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-background px-3.5 py-2 text-sm text-muted-foreground">
-        <Search className="size-4 shrink-0" />
-        <span className="flex-1">Search dishes, guests, orders...</span>
-        <span className="flex items-center gap-0.5 rounded-md border border-border bg-card px-1.5 py-0.5 text-xs">
-          <span aria-hidden>⌘</span>K
-        </span>
-      </div>
+      <CommandPalette restaurantSlug={restaurantSlug} />
 
       <AIBriefTrigger
         restaurantName={workspace?.name ?? ""}

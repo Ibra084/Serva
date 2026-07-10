@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ClipboardPaste, ExternalLink, Loader2, RotateCcw, Sparkles, UtensilsCrossed } from "lucide-react";
 import { PortalTopbar } from "@/components/portal/topbar";
 import { PortalPageSkeleton } from "@/components/portal/page-skeleton";
@@ -56,6 +57,8 @@ function emptyDraft(category: string): MenuItem {
 }
 
 export function MenuBuilderClient({ restaurantSlug }: { restaurantSlug: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +115,13 @@ export function MenuBuilderClient({ restaurantSlug }: { restaurantSlug: string }
       cancelled = true;
     };
   }, [restaurantSlug]);
+
+  useEffect(() => {
+    if (loading || searchParams.get("new") !== "item") return;
+    openNewItemEditor();
+    router.replace(`/portal/${restaurantSlug}/menu-builder`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, searchParams]);
 
   async function reloadAll() {
     setLoading(true);
